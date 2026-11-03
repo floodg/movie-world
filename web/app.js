@@ -368,6 +368,32 @@ function renderFavourites() {
   favouritesEl.appendChild(grid);
 }
 
+function clearDetailFit() {
+  detailEl.style.maxHeight = "";
+  detailEl.style.top = "";
+  detailEl.style.bottom = "";
+  detailEl.style.height = "";
+  detailEl.style.marginTop = "";
+  detailEl.style.marginBottom = "";
+}
+
+function fitDetailDialog() {
+  if (!detailEl.open) return;
+  const viewport = window.visualViewport;
+  const narrow = window.matchMedia("(max-width: 640px)").matches;
+  if (!narrow || !viewport) {
+    clearDetailFit();
+    return;
+  }
+  const gap = 8;
+  detailEl.style.top = Math.floor(viewport.offsetTop + gap) + "px";
+  detailEl.style.bottom = "auto";
+  detailEl.style.height = "auto";
+  detailEl.style.marginTop = "0";
+  detailEl.style.marginBottom = "0";
+  detailEl.style.maxHeight = Math.floor(viewport.height - gap * 2) + "px";
+}
+
 async function openDetail(movieId) {
   detailEl.replaceChildren();
   const loading = document.createElement("div");
@@ -377,6 +403,7 @@ async function openDetail(movieId) {
   loading.appendChild(message);
   detailEl.appendChild(loading);
   if (!detailEl.open) detailEl.showModal();
+  fitDetailDialog();
   try {
     renderDetail(await fetchJson(`/api/movies/${movieId}`));
   } catch (error) {
@@ -469,6 +496,8 @@ function renderDetail(movie) {
   }
   body.appendChild(actions);
   detailEl.append(hero, body);
+  fitDetailDialog();
+  if (window.MovieWorldTv) window.MovieWorldTv.mount(actions, movie);
 }
 
 function textSpan(value) {
@@ -732,6 +761,14 @@ actorForm.addEventListener("submit", (event) => {
 detailEl.addEventListener("click", (event) => {
   if (event.target === detailEl) detailEl.close();
 });
+
+detailEl.addEventListener("close", clearDetailFit);
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", fitDetailDialog);
+  window.visualViewport.addEventListener("scroll", fitDetailDialog);
+}
+window.addEventListener("resize", fitDetailDialog);
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && detailEl.open) detailEl.close();

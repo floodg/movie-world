@@ -1,0 +1,4 @@
+# Only needed for Play on TV (server.py --tv-playback). The catalogue browser itself is stdlib only.
+telethon==1.45.0
+cryptg==0.6.0
+async-upnp-client==0.49.0

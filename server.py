@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Local genre browser for the Movie World SQLite catalogue. Stdlib only."""
 import json
+import argparse
+import re
+import ssl
 import sqlite3
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -13,6 +16,9 @@ HOST = "127.0.0.1"
 PORT = 8765
 SEARCH_LIMIT = 48
 EXCLUDED_GENRE = "Adult"
+MAX_BODY = 8192
+JOB_ID = re.compile(r"^[0-9a-f]{32}$")
+TV_ROUTES = (("api", "tv"), ("api", "tvs"), ("api", "playback"))
 
 
 def not_excluded(movie_id="m.id"):
@@ -328,6 +334,8 @@ def movie_detail(movie_id):
 def static_file(url_path):
     if url_path == "/":
         url_path = "/index.html"
+    elif url_path in ("/tv", "/tv/"):
+        url_path = "/tv/index.html"
     rel = url_path.lstrip("/")
     if not rel or ".." in Path(rel).parts:
         return None
@@ -340,7 +348,15 @@ def static_file(url_path):
     return None
 
 
+def is_tv_route(path):
+    parts = tuple(part for part in path.split("/") if part)
+    return parts[:2] in TV_ROUTES
+
+
 class Handler(BaseHTTPRequestHandler):
+    tv = None
+    secure = False
+
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
@@ -348,9 +364,124 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         if path.startswith("/api/"):
+            if is_tv_route(path):
+                self.handle_tv("GET", path, parsed.query)
+                return
             self.handle_api(path, parsed.query)
             return
         self.serve_static(path)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        if not is_tv_route(path):
+            self.send_json({"error": "Not found"}, 404)
+            return
+        self.handle_tv("POST", path, parsed.query)
+
+    def handle_tv(self, method, path, query):
+        parts = [part for part in path.split("/") if part]
+        if self.tv is None:
+            if parts == ["api", "tv", "session"]:
+                self.send_json({"enabled": False})
+            else:
+                self.send_json({"error": "Play on TV is not enabled on this server."}, 404)
+            return
+        from tvplay.errors import PlaybackError
+        from tvplay.jobs import Busy, NotFound
+
+        body = {}
+        if method == "POST":
+            problem = self.cross_site_problem()
+            if problem:
+                self.send_json({"error": problem, "code": "forbidden"}, 403)
+                return
+            body = self.read_json()
+            if body is None:
+                return
+        if parts == ["api", "tv", "session"] and method == "GET":
+            self.send_json({"enabled": True})
+            return
+        manager = self.tv.manager
+        try:
+            if parts == ["api", "tvs"] and method == "GET":
+                refresh = parse_qs(query).get("refresh", [""])[0] == "1"
+                self.send_json(self.tv.call(manager.list_renderers(refresh)))
+            elif parts == ["api", "playback"] and method == "POST":
+                movie_id = body.get("movie_id")
+                renderer_id = body.get("renderer_id")
+                valid_id = isinstance(movie_id, int) and not isinstance(movie_id, bool)
+                if not valid_id or not isinstance(renderer_id, str) or len(renderer_id) > 200:
+                    self.send_json({"error": "Choose a title and a TV.", "code": "bad_request"}, 400)
+                    return
+                movie = movie_detail(movie_id)
+                if movie is None:
+                    self.send_json({"error": "Movie not found", "code": "not_found"}, 404)
+                    return
+                job, created = self.tv.call(
+                    manager.create(
+                        movie, renderer_id, body.get("idempotency_key"), body.get("replace") is True, body.get("start_at")
+                    )
+                )
+                self.send_json({"job": job}, 202 if created else 200)
+            elif len(parts) == 3 and parts[:2] == ["api", "resume"] and method == "GET" and parts[2].isascii() and parts[2].isdigit():
+                self.send_json({"resume": self.tv.call(manager.resume_point(int(parts[2])))})
+            elif parts == ["api", "playback", "active"] and method == "GET":
+                self.send_json({"job": self.tv.call(manager.active())})
+            elif len(parts) == 3 and parts[1] == "playback" and method == "GET" and JOB_ID.match(parts[2]):
+                self.send_json({"job": self.tv.call(manager.get(parts[2]))})
+            elif len(parts) == 4 and parts[1] == "playback" and method == "POST" and JOB_ID.match(parts[2]):
+                if parts[3] == "cancel":
+                    self.send_json({"job": self.tv.call(manager.cancel(parts[2]))})
+                elif parts[3] == "control":
+                    job = self.tv.call(manager.control(parts[2], body.get("action"), body.get("position")))
+                    self.send_json({"job": job})
+                else:
+                    self.send_json({"error": "Not found"}, 404)
+            else:
+                self.send_json({"error": "Not found"}, 404)
+        except PlaybackError as exc:
+            self.send_json({"error": exc.message, "code": exc.code, "retryable": exc.retryable}, 400)
+        except Busy as exc:
+            self.send_json(
+                {"error": f"The TV is busy with {exc.job['title']}.", "code": "busy", "job": exc.job}, 409
+            )
+        except NotFound:
+            self.send_json({"error": "Playback not found", "code": "not_found"}, 404)
+        except TimeoutError as exc:
+            self.send_json({"error": str(exc), "code": "timeout"}, 504)
+
+    def cross_site_problem(self):
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.split(";")[0].strip().lower() == "application/json":
+            return "Expected a JSON request."
+        site = self.headers.get("Sec-Fetch-Site")
+        if site and site not in ("same-origin", "none"):
+            return "Cross-site requests are not allowed."
+        origin = self.headers.get("Origin")
+        if origin:
+            scheme = "https" if self.secure else "http"
+            if origin != f"{scheme}://{self.headers.get('Host', '')}":
+                return "Cross-origin requests are not allowed."
+        return None
+
+    def read_json(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length < 0 or length > MAX_BODY:
+            self.send_json({"error": "Request too large", "code": "bad_request"}, 413)
+            return None
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            body = None
+        if not isinstance(body, dict):
+            self.send_json({"error": "Invalid JSON", "code": "bad_request"}, 400)
+            return None
+        return body
 
     def handle_api(self, path, query):
         parts = [part for part in path.split("/") if part]
@@ -413,12 +544,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_json(self, payload, status=200):
+    def send_json(self, payload, status=200, headers=None):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -430,13 +563,58 @@ def parse_id(value):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default=HOST)
+    parser.add_argument("--port", type=int, default=PORT)
+    parser.add_argument("--cert", type=Path, help="HTTPS certificate in PEM format")
+    parser.add_argument("--key", type=Path, help="HTTPS private key in PEM format")
+    parser.add_argument("--tv-playback", action="store_true", help="Enable Play on TV (needs requirements.txt)")
+    parser.add_argument("--media-port", type=int, help="Plain-HTTP port the TV fetches video from (default 8766)")
+    args = parser.parse_args()
+    if bool(args.cert) != bool(args.key):
+        parser.error("--cert and --key must be supplied together")
     if not DB.is_file():
         raise SystemExit(f"Database not found: {DB}")
     if not (WEB / "index.html").is_file():
         raise SystemExit(f"Missing frontend: {WEB / 'index.html'}")
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Movie World at http://{HOST}:{PORT}", flush=True)
-    server.serve_forever()
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    scheme = "http"
+    if args.cert:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(args.cert, args.key)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        scheme = "https"
+    Handler.secure = scheme == "https"
+    tv = start_tv_playback(args) if args.tv_playback else None
+    print(f"Movie World at {scheme}://{args.host}:{args.port}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if tv is not None:
+            tv.stop()
+
+
+def start_tv_playback(args):
+    try:
+        from tvplay import config as tv_config
+        from tvplay.service import TvPlayback
+    except ImportError as exc:
+        print(f"Play on TV disabled: {exc}. Install it with: pip install -r requirements.txt", flush=True)
+        return None
+    settings = tv_config.load()
+    if args.media_port:
+        settings["media_port"] = args.media_port
+    tv = TvPlayback(settings)
+    try:
+        tv.start()
+    except OSError as exc:
+        print(f"Play on TV disabled: media port {settings['media_port']} unavailable ({exc}).", flush=True)
+        return None
+    Handler.tv = tv
+    print(f"Play on TV enabled. The TV fetches video on port {settings['media_port']}.", flush=True)
+    return tv
 
 
 if __name__ == "__main__":
