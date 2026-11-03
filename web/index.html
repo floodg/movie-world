@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movie World</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <p class="brand">Movie World</p>
+    <div class="search-fields">
+      <form id="search" class="search" role="search">
+        <label class="visually-hidden" for="title-search">Search by title</label>
+        <input id="title-search" type="search" placeholder="Search by title" autocomplete="off" enterkeyhint="search" maxlength="80">
+      </form>
+      <form id="actor-search" class="search" role="search">
+        <label class="visually-hidden" for="actor-query">Search by actor</label>
+        <input id="actor-query" type="search" placeholder="Search by actor" autocomplete="off" enterkeyhint="search" maxlength="80">
+      </form>
+    </div>
+    <div class="top-actions">
+      <p class="tagline">Genres, highest rated first</p>
+      <button type="button" id="favourites-jump" class="fav-link">
+        Favourites
+        <span id="favourites-count">0</span>
+      </button>
+    </div>
+  </header>
+  <main>
+    <section id="results" class="results" hidden aria-live="polite"></section>
+    <section id="favourites" class="favourites" aria-labelledby="favourites-heading"></section>
+    <section id="genres" class="genre-grid" aria-label="Genres"></section>
+    <section id="rail" class="rail" hidden aria-live="polite"></section>
+  </main>
+  <footer class="credit">
+    This product uses the TMDB API but is not endorsed or certified by TMDB.
+  </footer>
+  <dialog id="detail" aria-label="Movie details"></dialog>
+  <script src="/app.js"></script>
+</body>
+</html>
