@@ -88,6 +88,8 @@ Do this once on each PC. Credentials, the Telegram session, the TV address and t
 download cache stay in `.local/`, which is not in Git. Each person uses their own
 Telegram account and their own API application.
 
+To have Codex, Cursor, or ChatGPT do the PC steps, open this folder in that tool and tell it to follow `docs/setup-plan.md`.
+
 ### 1. Install the playback tools
 
 Python 3.12 is what `scripts/start-tv.ps1` looks for first. Any current Python 3 on `PATH` also works.
