@@ -18,7 +18,7 @@ SEARCH_LIMIT = 48
 EXCLUDED_GENRE = "Adult"
 MAX_BODY = 8192
 JOB_ID = re.compile(r"^[0-9a-f]{32}$")
-TV_ROUTES = (("api", "tv"), ("api", "tvs"), ("api", "playback"))
+TV_ROUTES = (("api", "tv"), ("api", "tvs"), ("api", "playback"), ("api", "resume"))
 
 
 def not_excluded(movie_id="m.id"):
@@ -470,6 +470,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 )
                 self.send_json({"job": job}, 202 if created else 200)
+            elif parts == ["api", "resume"] and method == "GET":
+                self.send_json({"points": self.tv.call(manager.resume_points())})
             elif len(parts) == 3 and parts[:2] == ["api", "resume"] and method == "GET" and parts[2].isascii() and parts[2].isdigit():
                 self.send_json({"resume": self.tv.call(manager.resume_point(int(parts[2])))})
             elif parts == ["api", "playback", "active"] and method == "GET":

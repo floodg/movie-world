@@ -230,8 +230,8 @@ class Renderer:
     async def stop(self):
         await self._call("Stop")
 
-    async def seek(self, seconds):
-        await self._call("Seek", timeout=15, Unit="REL_TIME", Target=seconds_to_hms(seconds))
+    async def seek(self, seconds, mode="REL_TIME"):
+        await self._call("Seek", timeout=15, Unit=mode, Target=seconds_to_hms(seconds))
 
 
 async def ssdp_locations(timeout=5, targets=SEARCH_TARGETS):

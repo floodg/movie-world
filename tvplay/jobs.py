@@ -172,6 +172,9 @@ class JobManager:
     async def resume_point(self, movie_id):
         return store.query_one("SELECT position, duration FROM resume_points WHERE movie_id = ?", (movie_id,))
 
+    async def resume_points(self):
+        return store.query_all("SELECT movie_id, position, duration FROM resume_points WHERE duration > 0")
+
     async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None):
         if start_at is not None and (
             not isinstance(start_at, (int, float)) or isinstance(start_at, bool) or start_at < 0
@@ -194,8 +197,10 @@ class JobManager:
             if not replace:
                 raise Busy(self.snapshot(active))
             await self._finish(active, "stopped", "Replaced by another title.")
-        if start_at == 0:
-            store.execute("DELETE FROM resume_points WHERE movie_id = ?", (movie["id"],))
+        if start_at is None:
+            saved = await self.resume_point(movie["id"])
+            if saved:
+                start_at = saved["position"]
         now = store.now()
         for old_id in [key for key, old in self.jobs.items() if old["state"] in TERMINAL and now - old["updated_at"] > 86400]:
             del self.jobs[old_id]
@@ -219,7 +224,7 @@ class JobManager:
             "duration": None,
             "can_pause": False,
             "can_seek": False,
-            "start_at": int(start_at) if start_at else None,
+            "start_at": int(start_at) if start_at is not None else None,
         }
         store.execute(
             """INSERT INTO jobs (id, movie_id, title, renderer_id, renderer_name, idempotency_key, state, detail,
@@ -885,7 +890,13 @@ class JobManager:
         except (UpnpError, asyncio.TimeoutError, OSError) as exc:
             raise upnp_error(exc, "The TV did not accept the video") from exc
         if job.get("start_at"):
-            job["_notice"] = await self._jump_to_start(job, renderer)
+            try:
+                await self._jump_to_start(job, renderer)
+            except PlaybackError:
+                await self._stop_renderer_quiet(job)
+                raise
+        elif job.get("start_at") == 0:
+            store.execute("DELETE FROM resume_points WHERE movie_id = ?", (job["movie_id"],))
         self.cache.touch(entry["id"])
         self._set(job, "playing", self._playing_detail(job))
         return renderer, url
@@ -912,28 +923,29 @@ class JobManager:
         raise PlaybackError("The TV did not start playing. Check the TV for a prompt and try again.", "refused", True)
 
     async def _jump_to_start(self, job, renderer):
+        """Verify that the TV reached the requested position before tracking progress."""
         target = job["start_at"]
         if job["duration"]:
             target = min(target, max(0, job["duration"] - 5))
-        """Seek to the requested start. Returns a notice for the phone if the jump did not happen."""
         if not renderer.can("Seek"):
-            return "This TV cannot jump ahead, so it started from the beginning."
+            raise PlaybackError("This TV does not support seeking. Your saved position was kept.", "unsupported")
         self._set(job, "starting", f"Jumping to {seconds_to_hms(target)}")
-        # Samsung TVs can ignore a Seek sent just after playback starts, so check and retry once.
-        for attempt in range(2):
+        # Some TVs ignore the first seek after Play or only accept one time mode.
+        for mode in ("REL_TIME", "REL_TIME", "ABS_TIME"):
             try:
-                await renderer.seek(target)
+                await renderer.seek(target, mode=mode)
                 await asyncio.sleep(3)
                 position, _ = await renderer.position_info()
             except (UpnpError, PlaybackError, asyncio.TimeoutError, OSError):
-                position = None
-            if position is not None and position >= target - 30:
+                continue
+            if target > 0 and position and abs(position - target) <= 10:
                 job["position"] = position
-                return None
-            if position is None and attempt == 1:
-                return None
-            await asyncio.sleep(2)
-        return f"The TV did not jump to {seconds_to_hms(target)}; use the seek buttons."
+                return
+        raise PlaybackError(
+            f"The TV did not jump to {seconds_to_hms(target)}. Your saved position was kept.",
+            "seek_failed",
+            retryable=True,
+        )
 
     def _remember(self, job, force=False):
         """Save or clear the movie's resume point from the last position reported by the TV."""
@@ -963,7 +975,7 @@ class JobManager:
     def _playing_detail(self, job):
         if self._progress_open(job):
             return "Playing now. Download is still finishing for Resume."
-        return job.get("_notice") or "Playing"
+        return "Playing"
 
     def _paused_detail(self, job):
         if self._progress_open(job):

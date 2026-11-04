@@ -278,7 +278,6 @@
         replace,
         start_at: startAt,
       });
-      if (startAt === 0 && panelMovie && panelMovie.id === movieId) resumePoint = null;
       setJob(data.job);
     } catch (error) {
       if (error.status === 409 && error.data && error.data.job) {
@@ -327,6 +326,7 @@
     const finished = next && !next.active && (!job || job.active);
     job = next;
     if (finished && panelMovie && next.movie_id === panelMovie.id) loadResume(panelMovie.id);
+    if (finished) window.dispatchEvent(new Event("movie-world-progress"));
     render();
     clearTimeout(pollTimer);
     if (job && job.active) pollTimer = setTimeout(poll, POLL_MS);
@@ -370,13 +370,17 @@
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && session && session.enabled) {
+      window.dispatchEvent(new Event("movie-world-progress"));
       if (job && job.active) poll();
       else refreshActive();
     }
   });
 
   loadSession().then((current) => {
-    if (current.enabled) refreshActive();
+    if (current.enabled) {
+      refreshActive();
+      window.dispatchEvent(new Event("movie-world-progress"));
+    }
   });
 
   window.MovieWorldTv = { mount };

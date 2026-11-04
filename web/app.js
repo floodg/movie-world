@@ -307,6 +307,30 @@ function renderRail(genre, movies, scroll = true) {
   if (scroll) scrollToMovieList();
 }
 
+let watchedProgress = new Map();
+let watchedProgressRequest = 0;
+
+async function refreshWatchedProgress() {
+  const request = ++watchedProgressRequest;
+  try {
+    const { points } = await fetchJson("/api/resume");
+    if (request !== watchedProgressRequest) return;
+    watchedProgress = new Map(points.map(({ movie_id, position, duration }) =>
+      [String(movie_id), Math.min(100, 100 * position / duration)]));
+    for (const line of document.querySelectorAll(".watched-progress")) updateWatchedProgress(line);
+  } catch {
+    // The catalogue can run without TV playback enabled.
+  }
+}
+
+function updateWatchedProgress(line) {
+  const percent = watchedProgress.get(line.dataset.movieId) || 0;
+  line.style.width = `${percent}%`;
+  line.hidden = percent <= 0;
+}
+
+window.addEventListener("movie-world-progress", refreshWatchedProgress);
+
 function movieCard(movie) {
   const card = document.createElement("article");
   card.className = "card";
@@ -329,6 +353,12 @@ function movieCard(movie) {
   } else {
     wrap.appendChild(placeholder());
   }
+  const line = document.createElement("span");
+  line.className = "watched-progress";
+  line.dataset.movieId = movie.id;
+  line.setAttribute("aria-hidden", "true");
+  updateWatchedProgress(line);
+  wrap.appendChild(line);
 
   const rating = formatRating(movie.rating);
   if (rating) {

@@ -532,6 +532,16 @@ button, a { font: inherit; }
   background: var(--elevated);
 }
 
+.watched-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  background: #ef3038;
+  box-shadow: 0 0 3px #0009;
+  pointer-events: none;
+}
+
 .poster-wrap img,
 .placeholder {
   width: 168px;
