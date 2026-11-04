@@ -37,6 +37,196 @@ button, a { font: inherit; }
   flex-shrink: 0;
 }
 
+.header-tools {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 40px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: white;
+  cursor: pointer;
+}
+
+.filter-btn svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.filter-btn.is-on {
+  border-color: var(--accent);
+}
+
+.filter-summary {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.filter-btn:hover,
+.filter-btn:focus-visible {
+  border-color: white;
+}
+
+.year-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #1b1b1b;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+.year-panel-title {
+  margin: 0 0 10px;
+  font-weight: 700;
+}
+
+.decade-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.decade-chip,
+.year-range-fields button,
+.year-clear {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+}
+
+.decade-chip {
+  padding: 8px 2px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.decade-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.decade-chip:hover,
+.decade-chip:focus-visible,
+.year-range-fields button:hover,
+.year-range-fields button:focus-visible,
+.year-clear:hover,
+.year-clear:focus-visible,
+.range-chip button:hover,
+.range-chip button:focus-visible {
+  border-color: white;
+}
+
+.year-hint {
+  margin: 12px 0 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.year-range-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.year-range-fields label {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.year-range-fields input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--elevated);
+  color: var(--text);
+  font: inherit;
+}
+
+.year-range-fields input:focus {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+.year-range-fields button {
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 12px;
+  font-weight: 700;
+}
+
+.year-range-error {
+  margin: 8px 0 0;
+  color: #ff8a8a;
+  font-size: 0.8rem;
+}
+
+.year-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.year-ranges:not(:empty) { margin-top: 10px; }
+
+.range-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--elevated);
+  font-size: 0.85rem;
+}
+
+.range-chip button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.year-clear {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px;
+  color: var(--muted);
+}
+
 .fav-link {
   display: inline-flex;
   align-items: center;
@@ -274,6 +464,14 @@ button, a { font: inherit; }
 .rail-bar h2 {
   margin: 0;
   font-size: 1.25rem;
+}
+
+.rail-heading { min-width: 0; }
+
+.rail-filter {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .rail-nav { display: flex; gap: 8px; }

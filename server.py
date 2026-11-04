@@ -243,13 +243,58 @@ def movie_cast(movie_id):
     return [{"id": row["id"], "name": row["name"]} for row in rows]
 
 
-def search_movies(raw_query):
+YEAR_MIN = 1880
+YEAR_MAX = 2100
+MAX_YEAR_RANGES = 24
+
+
+def parse_year_ranges(raw):
+    if not isinstance(raw, str) or not raw.strip():
+        return []
+    ranges = []
+    seen = set()
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if len(ranges) >= MAX_YEAR_RANGES:
+            break
+        if "-" in token:
+            left, right = token.split("-", 1)
+        else:
+            left = right = token
+        if not left.isdigit() or not right.isdigit():
+            continue
+        start = int(left)
+        end = int(right)
+        if start > end:
+            start, end = end, start
+        if start < YEAR_MIN or end > YEAR_MAX:
+            continue
+        key = (start, end)
+        if key in seen:
+            continue
+        seen.add(key)
+        ranges.append(key)
+    return ranges
+
+
+def year_sql(ranges):
+    if not ranges:
+        return "", []
+    clause = " AND (" + " OR ".join("m.release_year BETWEEN ? AND ?" for _ in ranges) + ")"
+    params = [year for pair in ranges for year in pair]
+    return clause, params
+
+
+def search_movies(raw_query, raw_years=""):
     term = " ".join(raw_query.split())[:80]
     if not term:
         return {"query": "", "total": 0, "movies": []}
     escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     contains = f"%{escaped}%"
     prefix = f"{escaped}%"
+    year_clause, year_params = year_sql(parse_year_ranges(raw_years))
     rows = query_all(
         f"""
         SELECT
@@ -264,6 +309,7 @@ def search_movies(raw_query):
         FROM movies m
         WHERE COALESCE(m.title, m.source_title) LIKE ? ESCAPE '\\'
           AND {not_excluded()}
+          {year_clause}
         ORDER BY
           CASE
             WHEN COALESCE(m.title, m.source_title) LIKE ? ESCAPE '\\' THEN 0
@@ -273,7 +319,7 @@ def search_movies(raw_query):
           title COLLATE NOCASE
         LIMIT ?
         """,
-        (contains, prefix, SEARCH_LIMIT),
+        (contains, *year_params, prefix, SEARCH_LIMIT),
     )
     if not rows:
         return {"query": term, "total": 0, "movies": []}
@@ -490,7 +536,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "search"]:
             params = parse_qs(query, keep_blank_values=True)
-            self.send_json(search_movies(params.get("q", [""])[0]))
+            self.send_json(search_movies(
+                params.get("q", [""])[0],
+                params.get("years", [""])[0],
+            ))
             return
         if parts == ["api", "actors"]:
             params = parse_qs(query, keep_blank_values=True)
