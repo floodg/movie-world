@@ -263,6 +263,11 @@ function renderRail(genre, movies, scroll = true) {
       : `No titles in ${yearFilterLabel()}`;
     headingWrap.appendChild(note);
   }
+  appendMovieRail(railEl, bar, headingWrap, shown, `No ${genre.name} titles in ${yearFilterLabel()}.`);
+  if (scroll) scrollToMovieList();
+}
+
+function appendMovieRail(section, bar, headingWrap, shown, emptyMessage) {
   const nav = document.createElement("div");
   nav.className = "rail-nav";
   const prev = document.createElement("button");
@@ -281,9 +286,8 @@ function renderRail(genre, movies, scroll = true) {
     next.disabled = true;
     const status = document.createElement("p");
     status.className = "rail-status";
-    status.textContent = `No ${genre.name} titles in ${yearFilterLabel()}.`;
-    railEl.append(bar, status);
-    if (scroll) scrollToMovieList();
+    status.textContent = emptyMessage;
+    section.append(bar, status);
     return;
   }
 
@@ -302,22 +306,38 @@ function renderRail(genre, movies, scroll = true) {
     next.disabled = scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 4;
   };
   scroller.addEventListener("scroll", syncNav);
-  railEl.append(bar, scroller);
+  section.append(bar, scroller);
   requestAnimationFrame(syncNav);
-  if (scroll) scrollToMovieList();
 }
 
 let watchedProgress = new Map();
 let watchedProgressRequest = 0;
+let continueWatching = [];
+const continueWatchingEl = document.getElementById("continue-watching");
+const continueWatchingRow = document.getElementById("continue-watching-row");
+
+function renderContinueWatching() {
+  const shown = continueWatching.filter(movieMatchesYear);
+  continueWatchingRow.replaceChildren(...shown.map(movieCard));
+  continueWatchingEl.hidden = favouritesEl.hidden || !shown.length;
+}
 
 async function refreshWatchedProgress() {
   const request = ++watchedProgressRequest;
   try {
-    const { points } = await fetchJson("/api/resume");
+    const { points, movies } = await fetchJson("/api/resume");
     if (request !== watchedProgressRequest) return;
     watchedProgress = new Map(points.map(({ movie_id, position, duration }) =>
       [String(movie_id), Math.min(100, 100 * position / duration)]));
     for (const line of document.querySelectorAll(".watched-progress")) updateWatchedProgress(line);
+    // Static files can update while the running server still serves the older response.
+    const cards = movies ?? (await Promise.allSettled(points
+      .filter(({ position, duration }) => position > 0 && position < duration)
+      .map(({ movie_id }) => fetchJson(`/api/movies/${movie_id}`))))
+      .flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (request !== watchedProgressRequest) return;
+    continueWatching = cards;
+    renderContinueWatching();
   } catch {
     // The catalogue can run without TV playback enabled.
   }
@@ -519,29 +539,10 @@ function renderFavourites() {
       : `None in ${yearFilterLabel()}`;
     headingWrap.appendChild(note);
   }
-  bar.appendChild(headingWrap);
-  favouritesEl.appendChild(bar);
-
-  if (favourites.length === 0) {
-    const status = document.createElement("p");
-    status.className = "rail-status";
-    status.textContent = "Save a title with the heart and it stays in this list.";
-    favouritesEl.appendChild(status);
-    return;
-  }
-
-  if (!shown.length) {
-    const status = document.createElement("p");
-    status.className = "rail-status";
-    status.textContent = `No favourites in ${yearFilterLabel()}.`;
-    favouritesEl.appendChild(status);
-    return;
-  }
-
-  const grid = document.createElement("div");
-  grid.className = "favourites-grid";
-  for (const movie of shown) grid.appendChild(movieCard(movie));
-  favouritesEl.appendChild(grid);
+  const emptyMessage = favourites.length
+    ? `No favourites in ${yearFilterLabel()}.`
+    : "Save a title with the heart and it stays in this list.";
+  appendMovieRail(favouritesEl, bar, headingWrap, shown, emptyMessage);
 }
 
 function clearDetailFit() {
@@ -692,12 +693,14 @@ function showBrowse() {
   resultsEl.hidden = true;
   resultsEl.replaceChildren();
   favouritesEl.hidden = false;
+  continueWatchingEl.hidden = !continueWatchingRow.childElementCount;
   genresEl.hidden = false;
   railEl.hidden = openGenreId == null;
 }
 
 function hideBrowse() {
   favouritesEl.hidden = true;
+  continueWatchingEl.hidden = true;
   genresEl.hidden = true;
   railEl.hidden = true;
   resultsEl.hidden = false;
@@ -1053,6 +1056,7 @@ function commitYearFilter() {
   saveYearFilter();
   syncYearFilterUi();
   renderFavourites();
+  renderContinueWatching();
   refreshOpenRail();
   refreshResultsForYear();
 }
@@ -1142,6 +1146,7 @@ document.getElementById("favourites-jump").addEventListener("click", () => {
 
 syncYearFilterUi();
 renderFavourites();
+refreshWatchedProgress();
 
 fetchJson("/api/genres")
   .then((rows) => {

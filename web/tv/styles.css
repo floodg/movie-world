@@ -440,12 +440,6 @@ button, a { font: inherit; }
   color: var(--muted);
 }
 
-.credit {
-  padding: 8px 28px 28px;
-  color: #8d8d8d;
-  font-size: 0.78rem;
-}
-
 dialog {
   width: calc(100vw - 32px); max-width: 760px;
   max-height: calc(100vh - 32px);
@@ -535,7 +529,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.72); }
 .telegram:hover { filter: brightness(1.08); }
 
 @media (max-width: 640px) {
-  .top, .genre-grid, .rail-bar, .scroller, .credit, .favourites-grid, .results { padding-left: 16px; padding-right: 16px; }
+  .top, .genre-grid, .rail-bar, .scroller, .favourites-grid, .results { padding-left: 16px; padding-right: 16px; }
   .top { align-items: stretch; flex-direction: column; justify-content: flex-start; gap: 12px; }
   .search-fields { flex: 0 1 auto; flex-direction: column; width: 100%; }
   .search { flex: 0 0 auto; width: 100%; }

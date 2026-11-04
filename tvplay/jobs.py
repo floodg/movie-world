@@ -173,7 +173,10 @@ class JobManager:
         return store.query_one("SELECT position, duration FROM resume_points WHERE movie_id = ?", (movie_id,))
 
     async def resume_points(self):
-        return store.query_all("SELECT movie_id, position, duration FROM resume_points WHERE duration > 0")
+        return store.query_all(
+            "SELECT movie_id, position, duration FROM resume_points "
+            "WHERE duration > 0 ORDER BY updated_at DESC, movie_id"
+        )
 
     async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None):
         if start_at is not None and (

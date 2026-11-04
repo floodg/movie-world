@@ -63,12 +63,15 @@
   <main>
     <section id="results" class="results" hidden aria-live="polite"></section>
     <section id="favourites" class="favourites" aria-labelledby="favourites-heading"></section>
+    <section id="continue-watching" class="favourites" aria-labelledby="continue-watching-heading" hidden>
+      <div class="rail-bar">
+        <div class="rail-heading"><h2 id="continue-watching-heading">Continue Watching</h2></div>
+      </div>
+      <div id="continue-watching-row" class="scroller"></div>
+    </section>
     <section id="genres" class="genre-grid" aria-label="Genres"></section>
     <section id="rail" class="rail" hidden aria-live="polite"></section>
   </main>
-  <footer class="credit">
-    This product uses the TMDB API but is not endorsed or certified by TMDB.
-  </footer>
   <dialog id="detail" aria-label="Movie details"></dialog>
   <script src="/tvcast.js"></script>
   <script src="/app.js"></script>

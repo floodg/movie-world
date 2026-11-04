@@ -223,9 +223,12 @@
       localStorage.setItem(RENDERER_KEY, select.value);
       startPlayback(panelMovie.id, select.value, false, startAt);
     };
+    const playingThisMovie = job && job.movie_id === panelMovie.id && ON_TV.has(job.state);
     const plays = resumePoint
       ? [
-          button(`Resume from ${formatDuration(resumePoint.position)}`, () => playFrom(resumePoint.position), "tv-btn is-primary"),
+          ...(playingThisMovie ? [] : [
+            button(`Resume from ${formatDuration(resumePoint.position)}`, () => playFrom(resumePoint.position), "tv-btn is-primary"),
+          ]),
           button("Start over", () => playFrom(0)),
         ]
       : [button("Play on TV", () => playFrom(undefined), "tv-btn is-primary")];

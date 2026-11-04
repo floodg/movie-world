@@ -152,6 +152,25 @@ def movie_card(row):
     }
 
 
+def continue_watching_movies(points):
+    ids = [point["movie_id"] for point in points if 0 < point["position"] < point["duration"]]
+    cards = {}
+    for start in range(0, len(ids), 500):
+        batch = ids[start:start + 500]
+        placeholders = ", ".join("?" for _ in batch)
+        rows = query_all(
+            f"""
+            SELECT m.id, COALESCE(m.title, m.source_title) AS title, m.release_year,
+                   m.imdb_rating, m.imdb_votes, m.poster_url, m.media_type
+            FROM movies m
+            WHERE m.id IN ({placeholders}) AND {not_excluded()}
+            """,
+            batch,
+        )
+        cards.update((row["id"], movie_card(row)) for row in rows)
+    return [cards[movie_id] for movie_id in ids if movie_id in cards]
+
+
 def table_exists(name):
     row = query_one(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -471,7 +490,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self.send_json({"job": job}, 202 if created else 200)
             elif parts == ["api", "resume"] and method == "GET":
-                self.send_json({"points": self.tv.call(manager.resume_points())})
+                points = self.tv.call(manager.resume_points())
+                self.send_json({"points": points, "movies": continue_watching_movies(points)})
             elif len(parts) == 3 and parts[:2] == ["api", "resume"] and method == "GET" and parts[2].isascii() and parts[2].isdigit():
                 self.send_json({"resume": self.tv.call(manager.resume_point(int(parts[2])))})
             elif parts == ["api", "playback", "active"] and method == "GET":

@@ -609,13 +609,6 @@ button, a { font: inherit; }
   border-bottom: 1px solid var(--line);
 }
 
-.favourites-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 4px 28px 18px;
-}
-
 .rating-badge,
 .media-badge {
   position: absolute;
@@ -646,12 +639,6 @@ button, a { font: inherit; }
 .rail-status {
   padding: 12px 28px 20px;
   color: var(--muted);
-}
-
-.credit {
-  padding: 8px 28px 28px;
-  color: #8d8d8d;
-  font-size: 0.78rem;
 }
 
 dialog {
@@ -839,7 +826,7 @@ body:has(.tv-bar:not([hidden])) { padding-bottom: 150px; }
 .tv-bar p { margin: 4px 0 0; }
 
 @media (max-width: 640px) {
-  .top, .genre-grid, .rail-bar, .scroller, .credit, .favourites-grid, .results { padding-left: 16px; padding-right: 16px; }
+  .top, .genre-grid, .rail-bar, .scroller, .results { padding-left: 16px; padding-right: 16px; }
   .top { align-items: stretch; flex-direction: column; justify-content: flex-start; gap: 12px; }
   .search-fields { flex: 0 1 auto; flex-direction: column; width: 100%; }
   .search { flex: 0 0 auto; width: 100%; }
