@@ -439,10 +439,60 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        if re.fullmatch(r"/api/movies/[0-9]+/upload", path):
+            self.handle_upload(path)
+            return
         if not is_tv_route(path):
             self.send_json({"error": "Not found"}, 404)
             return
         self.handle_tv("POST", path, parsed.query)
+
+    def handle_upload(self, path):
+        from tvplay.errors import PlaybackError
+        from tvplay.cache import disk_full
+        self.close_connection = True
+        if self.tv is None:
+            self.send_json({"error": "Play on TV is not enabled on this server."}, 404)
+            return
+        problem = self.cross_site_problem("application/octet-stream")
+        if problem:
+            self.send_json({"error": problem}, 403)
+            return
+        entry = None
+        complete = False
+        manager = self.tv.manager
+        try:
+            if self.headers.get("Transfer-Encoding"):
+                raise PlaybackError("Upload requires a file size.", "bad_request")
+            try:
+                size = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                size = 0
+            movie = movie_detail(int(path.split("/")[3]))
+            if movie is None:
+                self.send_json({"error": "Movie not found"}, 404)
+                return
+            ext = Path(unquote(self.headers.get("X-File-Name", ""))).suffix.lower()
+            entry = self.tv.call(manager.begin_upload(movie, size, ext))
+            self.connection.settimeout(120)
+            with manager.cache.path(entry["source_name"]).open("xb") as target:
+                remaining = size
+                while remaining:
+                    block = self.rfile.read(min(1024 * 1024, remaining))
+                    if not block:
+                        raise PlaybackError("Upload interrupted. Select the file to try again.", "incomplete")
+                    target.write(block)
+                    remaining -= len(block)
+            self.tv.call(manager.finish_upload(entry["id"], True), timeout=180)
+            complete = True
+            self.send_json({"uploaded": True, "movie_id": movie["id"]})
+        except PlaybackError as exc:
+            self.send_json({"error": exc.message, "code": exc.code}, 400)
+        except (OSError, TimeoutError) as exc:
+            self.send_json({"error": "The server disk is full." if disk_full(exc) else "Upload interrupted. Please try again."}, 400)
+        finally:
+            if entry is not None and not complete:
+                self.tv.call(manager.finish_upload(entry["id"], False))
 
     def handle_tv(self, method, path, query):
         parts = [part for part in path.split("/") if part]
@@ -519,10 +569,10 @@ class Handler(BaseHTTPRequestHandler):
         except TimeoutError as exc:
             self.send_json({"error": str(exc), "code": "timeout"}, 504)
 
-    def cross_site_problem(self):
+    def cross_site_problem(self, expected_type="application/json"):
         content_type = self.headers.get("Content-Type", "")
-        if not content_type.split(";")[0].strip().lower() == "application/json":
-            return "Expected a JSON request."
+        if not content_type.split(";")[0].strip().lower() == expected_type:
+            return "Unexpected request content type."
         site = self.headers.get("Sec-Fetch-Site")
         if site and site not in ("same-origin", "none"):
             return "Cross-site requests are not allowed."

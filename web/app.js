@@ -674,6 +674,47 @@ function renderDetail(movie) {
     link.rel = "noopener noreferrer";
     link.textContent = "Open in Telegram";
     actions.appendChild(link);
+    const upload = document.createElement("button");
+    upload.type = "button";
+    upload.className = "fav-action";
+    upload.textContent = "Upload from Telegram";
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = "video/*,.mkv,.avi,.m4v,.ts,.m2ts,.wmv,.mpg,.mpeg,.flv";
+    picker.hidden = true;
+    const status = document.createElement("p");
+    status.className = "upload-status";
+    status.setAttribute("role", "status");
+    status.textContent = "Save the video from Telegram, then choose it here to upload to the server.";
+    upload.addEventListener("click", () => picker.click());
+    picker.addEventListener("change", () => {
+      const file = picker.files[0];
+      if (!file || upload.disabled) return;
+      upload.disabled = true;
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/movies/${movie.id}/upload`);
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.floor(event.loaded / event.total * 100);
+          status.textContent = percent === 100 ? "Upload received. Checking the video..." : `Uploading ${file.name}: ${percent}%`;
+        }
+      });
+      xhr.addEventListener("load", () => {
+        let result = {};
+        try { result = JSON.parse(xhr.responseText); } catch {}
+        status.textContent = xhr.status >= 200 && xhr.status < 300
+          ? "Saved to the server cache. Choose Play on TV to stream it."
+          : result.error || "Upload failed. Please try again.";
+      });
+      xhr.addEventListener("error", () => { status.textContent = "Connection lost. Select the file to try again."; });
+      xhr.addEventListener("loadend", () => { upload.disabled = false; picker.value = ""; });
+      status.textContent = `Uploading ${file.name}...`;
+      xhr.send(file);
+    });
+    actions.append(upload, picker);
+    body.appendChild(status);
   }
   body.appendChild(actions);
   detailEl.append(hero, body);

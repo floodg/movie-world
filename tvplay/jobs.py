@@ -60,8 +60,46 @@ class JobManager:
         self.media = MediaServer(self.resolve_media, port=int(settings.get("media_port") or 8766), reads=self.reads)
         self.jobs = {}
         self.tasks = {}
+        self.uploads = {}
         self.growing = {}
         self.discovery_task = None
+
+    async def begin_upload(self, movie, size, ext):
+        from .cache import MIME_BY_EXT
+        if ext not in MIME_BY_EXT or size <= 0:
+            raise PlaybackError("Choose a video file saved from Telegram.", "bad_media")
+        channel, message = parse_message_link(movie.get("telegram_url"))
+        if any(j["state"] not in TERMINAL and j["telegram_url"] == movie["telegram_url"] for j in self.jobs.values()):
+            raise PlaybackError("Stop playback for this movie before uploading.", "busy")
+        if any(e["channel_id"] == channel and e["message_id"] == message for e in self.uploads.values()):
+            raise PlaybackError("This movie is already being uploaded.", "busy")
+        old = self.cache.lookup(channel, message)
+        if old:
+            raise PlaybackError("This movie is already saved in the server cache.", "already_cached")
+        self.cache.ensure_space(size, self._protected_ids())
+        name = "upload_" + uuid.uuid4().hex + ext
+        entry = self.cache.begin_stream(channel, message, name, size, mime_for(ext), None, None)
+        self.uploads[entry["id"]] = entry
+        return entry
+
+    async def finish_upload(self, entry_id, success):
+        entry = self.uploads.get(entry_id)
+        if entry is None:
+            return
+        try:
+            if success:
+                data = await formats.probe(self.settings, self.cache.path(entry["source_name"]))
+                if data is not None and not any(s.get("codec_type") == "video" for s in data.get("streams", [])):
+                    raise PlaybackError("The selected file has no video track.", "bad_media")
+                self.cache.finish_stream(entry_id, formats.duration_of(data) if data else None)
+                store.execute("UPDATE cache_entries SET play_name = NULL, play_size = NULL WHERE id = ?", (entry_id,))
+            else:
+                self.cache.remove(entry)
+        except BaseException:
+            self.cache.remove(entry)
+            raise
+        finally:
+            self.uploads.pop(entry_id, None)
 
     async def start(self):
         store.init()
@@ -190,6 +228,9 @@ class JobManager:
             if existing:
                 return await self.get(existing["id"]), False
         parse_message_link(movie.get("telegram_url"))
+        channel, message = parse_message_link(movie.get("telegram_url"))
+        if any(e["channel_id"] == channel and e["message_id"] == message for e in self.uploads.values()):
+            raise PlaybackError("Wait for this movie's upload to finish.", "busy")
         renderer = store.query_one("SELECT id, name FROM renderers WHERE id = ?", (renderer_id,))
         if renderer is None:
             raise PlaybackError("Unknown TV. Refresh the TV list and choose again.", "bad_renderer")

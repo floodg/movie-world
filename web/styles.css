@@ -842,3 +842,6 @@ body:has(.tv-bar:not([hidden])) { padding-bottom: 150px; }
     margin: 0 auto;
   }
 }
+
+.upload-status { font-size: .9rem; color: var(--muted); overflow-wrap: anywhere; }
+.fav-action:disabled { opacity: .6; cursor: wait; }
