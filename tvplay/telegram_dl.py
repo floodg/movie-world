@@ -87,6 +87,18 @@ class TelegramSource:
         try:
             entity = await self._channel(channel_id)
             message = await self.client.get_messages(entity, ids=message_id)
+            if message is not None and not is_video_document(message) and message.grouped_id:
+                # Catalogue links often point at an album's poster. Look ahead
+                # within that album, never selecting the next movie's video.
+                following = await self.client.get_messages(
+                    entity, ids=list(range(message_id + 1, message_id + 21))
+                )
+                for candidate in sorted((m for m in following if m is not None), key=lambda m: m.id):
+                    if candidate.grouped_id != message.grouped_id:
+                        break
+                    if is_video_document(candidate):
+                        message = candidate
+                        break
         except (errors.ChannelPrivateError, errors.ChannelInvalidError) as exc:
             raise PlaybackError("The Telegram account on the PC has no access to this channel.", "no_access") from exc
         except errors.MessageIdInvalidError as exc:
