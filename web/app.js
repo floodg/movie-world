@@ -293,6 +293,7 @@ function appendMovieRail(section, bar, headingWrap, shown, emptyMessage) {
 
   const scroller = document.createElement("div");
   scroller.className = "scroller";
+  enableMouseDrag(scroller);
   for (const movie of shown) scroller.appendChild(movieCard(movie));
 
   prev.addEventListener("click", () => {
@@ -310,16 +311,62 @@ function appendMovieRail(section, bar, headingWrap, shown, emptyMessage) {
   requestAnimationFrame(syncNav);
 }
 
+function enableMouseDrag(scroller) {
+  let drag = null;
+  let suppressClick = false;
+  scroller.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    // Leave the native scrollbar available for dragging too.
+    if (event.clientY >= scroller.getBoundingClientRect().top + scroller.clientHeight) return;
+    suppressClick = false;
+    drag = { id: event.pointerId, x: event.clientX, left: scroller.scrollLeft, active: false };
+  });
+  scroller.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const distance = event.clientX - drag.x;
+    if (!drag.active) {
+      if (Math.abs(distance) < 6) return;
+      drag.active = true;
+      suppressClick = true;
+      scroller.setPointerCapture(event.pointerId);
+      scroller.classList.add("is-dragging");
+    }
+    event.preventDefault();
+    scroller.scrollLeft = drag.left - distance;
+  });
+  const finish = (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    drag = null;
+    scroller.classList.remove("is-dragging");
+    if (scroller.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+  };
+  scroller.addEventListener("pointerup", finish);
+  scroller.addEventListener("pointercancel", finish);
+  scroller.addEventListener("lostpointercapture", finish);
+  scroller.addEventListener("pointerleave", (event) => {
+    if (drag && !drag.active) finish(event);
+  });
+  scroller.addEventListener("dragstart", (event) => event.preventDefault());
+  scroller.addEventListener("click", (event) => {
+    if (!suppressClick || event.detail === 0) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    suppressClick = false;
+  }, true);
+}
+
 let watchedProgress = new Map();
 let watchedProgressRequest = 0;
 let continueWatching = [];
-let recentlyWatched = [];
+let historyRequest = 0;
 /** @type {Map<string, {movie_id:number, position:number, duration:number|null, finished:boolean, updated_at:number}>} */
 let watchStore = new Map();
 const continueWatchingEl = document.getElementById("continue-watching");
 const continueWatchingRow = document.getElementById("continue-watching-row");
-const recentlyWatchedEl = document.getElementById("recently-watched");
-const recentlyWatchedRow = document.getElementById("recently-watched-row");
+const historyEl = document.getElementById("history");
+const historyMoviesEl = document.getElementById("history-movies");
+const historyStatusEl = document.getElementById("history-status");
+enableMouseDrag(continueWatchingRow);
 const WATCH_LOCAL_KEY = "movie-world-watch-progress";
 
 function loadLocalWatchStore() {
@@ -369,12 +416,49 @@ function renderContinueWatching() {
   continueWatchingEl.hidden = favouritesEl.hidden || !shown.length;
 }
 
-function renderRecentlyWatched() {
-  if (!recentlyWatchedEl || !recentlyWatchedRow) return;
-  const shown = recentlyWatched.filter(movieMatchesYear);
-  recentlyWatchedRow.replaceChildren(...shown.map(movieCard));
-  recentlyWatchedEl.hidden = favouritesEl.hidden || !shown.length;
+async function renderHistory() {
+  if (!historyEl.open) return;
+  const request = ++historyRequest;
+  const points = [...watchStore.values()].sort((a, b) => b.updated_at - a.updated_at);
+  const movies = await cardsForPoints(points);
+  if (request !== historyRequest || !historyEl.open) return;
+  const byId = new Map(movies.map((movie) => [String(movie.id), movie]));
+  const cards = points.flatMap((point) => {
+    const movie = byId.get(String(point.movie_id));
+    if (!movie) return [];
+    const card = movieCard(movie);
+    const note = document.createElement("p");
+    note.className = "rail-status";
+    const date = new Date(point.updated_at * 1000).toLocaleString();
+    note.textContent = `${point.finished ? "Watched" : "In progress"} · ${date}`;
+    card.appendChild(note);
+    return [card];
+  });
+  historyMoviesEl.replaceChildren(...cards);
+  historyStatusEl.textContent = points.length
+    ? (cards.length ? "Latest watched first. " : "History titles are unavailable from this catalogue. ")
+    : "Your watch history is empty. ";
+  historyStatusEl.textContent += window.MovieWorldCloud?.session()
+    ? "History syncs with your account."
+    : "Saved on this browser. Sign in to sync history across devices.";
 }
+
+document.getElementById("history-open").addEventListener("click", async () => {
+  historyEl.showModal();
+  historyStatusEl.textContent = "Loading history…";
+  await refreshWatchedProgress();
+  if (window.MovieWorldCloud?.session()) {
+    historyStatusEl.textContent = "Syncing history…";
+    try {
+      await window.MovieWorldCloud.syncWatchProgress();
+      await renderHistory();
+    } catch {
+      await renderHistory();
+      historyStatusEl.textContent += " Could not sync; showing the saved copy.";
+    }
+  }
+});
+document.getElementById("history-close").addEventListener("click", () => historyEl.close());
 
 async function cardsForPoints(points, movies) {
   if (movies && movies.length) return movies;
@@ -387,18 +471,12 @@ async function cardsForPoints(points, movies) {
 async function refreshWatchRails() {
   const points = [...watchStore.values()].sort((a, b) => b.updated_at - a.updated_at);
   const continuingPoints = points.filter(isContinuePoint).slice(0, 20);
-  const recentPoints = points.slice(0, 24);
-  const [continueCards, recentCards] = await Promise.all([
-    cardsForPoints(continuingPoints),
-    cardsForPoints(recentPoints),
-  ]);
+  const continueCards = await cardsForPoints(continuingPoints);
   const continueIds = new Set(continuingPoints.map((point) => String(point.movie_id)));
-  const recentIds = new Set(recentPoints.map((point) => String(point.movie_id)));
   continueWatching = continueCards.filter((movie) => continueIds.has(String(movie.id)));
-  recentlyWatched = recentCards.filter((movie) => recentIds.has(String(movie.id)));
   applyWatchStoreToUi();
   renderContinueWatching();
-  renderRecentlyWatched();
+  await renderHistory();
 }
 
 function upsertWatchPoint(point, { mirror = false, pushCloud = false } = {}) {
@@ -467,7 +545,7 @@ async function refreshWatchedProgress() {
         duration: point.duration,
         finished: false,
         updated_at: point.updated_at ?? Date.now() / 1000,
-      });
+      }, { pushCloud: true });
       if (next) winners.push(next);
     }
     if (movies && movies.length) {
@@ -1014,7 +1092,6 @@ function showBrowse() {
   resultsEl.replaceChildren();
   favouritesEl.hidden = false;
   continueWatchingEl.hidden = !continueWatchingRow.childElementCount;
-  if (recentlyWatchedEl) recentlyWatchedEl.hidden = !(recentlyWatchedRow && recentlyWatchedRow.childElementCount);
   genresEl.hidden = false;
   railEl.hidden = openGenreId == null;
 }
@@ -1022,7 +1099,6 @@ function showBrowse() {
 function hideBrowse() {
   favouritesEl.hidden = true;
   continueWatchingEl.hidden = true;
-  if (recentlyWatchedEl) recentlyWatchedEl.hidden = true;
   genresEl.hidden = true;
   railEl.hidden = true;
   resultsEl.hidden = false;
@@ -1482,3 +1558,33 @@ fetchJson("/api/genres")
     message.textContent = "Could not load genres.";
     genresEl.replaceWith(message);
   });
+
+const headerMenu = document.getElementById("header-menu");
+const headerMenuToggle = document.getElementById("header-menu-toggle");
+function setHeaderMenu(open, restoreFocus = false) {
+  headerMenu.classList.toggle("is-open", open);
+  headerMenuToggle.setAttribute("aria-expanded", String(open));
+  if (!open) {
+    setYearPanel(false);
+    const accountPanel = document.getElementById("account-panel");
+    if (accountPanel) accountPanel.hidden = true;
+    if (restoreFocus) headerMenuToggle.focus();
+  }
+}
+headerMenuToggle.addEventListener("click", () => {
+  setHeaderMenu(!headerMenu.classList.contains("is-open"));
+});
+document.addEventListener("click", (event) => {
+  if (!headerMenu.contains(event.target)) setHeaderMenu(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && headerMenu.classList.contains("is-open")) {
+    setHeaderMenu(false, true);
+  }
+});
+headerMenu.addEventListener("focusout", (event) => {
+  if (event.relatedTarget && !headerMenu.contains(event.relatedTarget)) setHeaderMenu(false);
+});
+for (const id of ["favourites-jump", "history-open"]) {
+  document.getElementById(id).addEventListener("click", () => setHeaderMenu(false));
+}

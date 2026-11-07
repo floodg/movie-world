@@ -4,6 +4,7 @@ Everything here runs on the single worker event loop owned by service.TvPlayback
 """
 import asyncio
 import json
+import math
 import os
 import re
 import time
@@ -290,7 +291,7 @@ class JobManager:
 
     async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None):
         if start_at is not None and (
-            not isinstance(start_at, (int, float)) or isinstance(start_at, bool) or start_at < 0
+            not isinstance(start_at, (int, float)) or isinstance(start_at, bool) or not math.isfinite(start_at) or start_at < 0
         ):
             raise PlaybackError("Invalid start position.", "bad_request")
         if idempotency_key is not None:
@@ -303,7 +304,8 @@ class JobManager:
         channel, message = parse_message_link(movie.get("telegram_url"))
         if any(e["channel_id"] == channel and e["message_id"] == message for e in self.uploads.values()):
             raise PlaybackError("Wait for this movie's upload to finish.", "busy")
-        renderer = store.query_one("SELECT id, name FROM renderers WHERE id = ?", (renderer_id,))
+        renderer = ({"id": renderer_id, "name": "Samsung app"} if renderer_id.startswith("tizen:") else
+                    store.query_one("SELECT id, name FROM renderers WHERE id = ?", (renderer_id,)))
         if renderer is None:
             raise PlaybackError("Unknown TV. Refresh the TV list and choose again.", "bad_renderer")
         active = self._active()
@@ -421,6 +423,7 @@ class JobManager:
             "can_seek": job.get("can_seek", False),
             "active": job["state"] not in TERMINAL,
             "updated_at": job["updated_at"],
+            "start_at": job.get("start_at"),
         }
 
     def _set(self, job, state, detail=None, persist=True):
@@ -443,6 +446,8 @@ class JobManager:
         self._set(job, "failed", None)
 
     async def _finish(self, job, final, detail):
+        if job["renderer_id"].startswith("tizen:"):
+            self._remember(job, force=True)
         job["_final"] = (final, detail)
         renderer = job.get("_renderer")
         if job["state"] in ON_TV and renderer is not None:
@@ -493,8 +498,53 @@ class JobManager:
 
     async def _play_ready(self, job, entry):
         entry = await self._prepare(job, entry)
+        if job["renderer_id"].startswith("tizen:"):
+            host = self.settings.get("media_host") or local_ip_for(job["renderer_id"][6:])
+            job["media_url"] = self.media.url_for(host, entry["token"], "movie" + os.path.splitext(entry["play_name"])[1])
+            job["duration"] = entry["duration"]
+            job["_heartbeat"] = store.now()
+            self._set(job, "starting", "Ready for the Samsung app")
+            while job["state"] not in TERMINAL:
+                if store.now() - job["_heartbeat"] > 90:
+                    self._remember(job, force=True)
+                    self._set(job, "stopped", "Samsung app disconnected")
+                    break
+                await asyncio.sleep(3)
+            return
         renderer, url = await self._start_tv(job, entry)
         await self._monitor(job, renderer, url)
+
+    async def app_progress(self, job_id, body):
+        job = self.jobs.get(job_id)
+        if not job or not job["renderer_id"].startswith("tizen:"):
+            raise PlaybackError("Unknown app session.", "not_found")
+        state = body.get("state")
+        if state not in ("playing", "paused", "stopped", "ended", "failed"):
+            raise PlaybackError("Invalid player state.", "bad_request")
+        for key in ("position", "duration"):
+            value = body.get(key)
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                    raise PlaybackError("Invalid player time.", "bad_request")
+        if job["state"] in TERMINAL:
+            return self.snapshot(job)
+        if not job.get("media_url"):
+            raise PlaybackError("Video is not ready.", "not_ready")
+        job["_heartbeat"] = store.now()
+        job["position"] = body.get("position", job.get("position"))
+        job["duration"] = body.get("duration") or job.get("duration")
+        self._remember(job, force=state in TERMINAL)
+        if state == "ended":
+            store.execute("DELETE FROM resume_points WHERE movie_id = ?", (job["movie_id"],))
+        self._set(job, state, "Samsung app: " + state)
+        return self.snapshot(job)
+
+    async def app_status(self, job_id):
+        result = await self.get(job_id)
+        job = self.jobs.get(job_id)
+        if job and job["state"] not in TERMINAL:
+            result["media_url"] = job.get("media_url")
+        return result
 
     # Download
 
@@ -534,7 +584,9 @@ class JobManager:
         unlink(path)
         growing = GrowingFile(path, video.size)
         job["_download_path"] = path
-        if job.get("start_at"):
+        if job["renderer_id"].startswith("tizen:"):
+            self._skip_early(job, "Downloading the whole file for the Samsung app.")
+        elif job.get("start_at"):
             self._skip_early(job, "Downloading the whole file so Resume can jump to the saved time.")
         elif not video.size or video.size < STREAM_MIN_FILE:
             self._skip_early(job, None)

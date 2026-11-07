@@ -5,6 +5,7 @@ import argparse
 import re
 import ssl
 import sqlite3
+import secrets
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -439,6 +440,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        if path.startswith("/api/tizen/"):
+            self.handle_tizen(path)
+            return
         if re.fullmatch(r"/api/movies/[0-9]+/upload", path):
             self.handle_upload(path)
             return
@@ -526,7 +530,7 @@ class Handler(BaseHTTPRequestHandler):
                 movie_id = body.get("movie_id")
                 renderer_id = body.get("renderer_id")
                 valid_id = isinstance(movie_id, int) and not isinstance(movie_id, bool)
-                if not valid_id or not isinstance(renderer_id, str) or len(renderer_id) > 200:
+                if not valid_id or not isinstance(renderer_id, str) or len(renderer_id) > 200 or renderer_id.startswith("tizen:"):
                     self.send_json({"error": "Choose a title and a TV.", "code": "bad_request"}, 400)
                     return
                 movie = movie_detail(movie_id)
@@ -585,6 +589,66 @@ class Handler(BaseHTTPRequestHandler):
             if origin != f"{scheme}://{self.headers.get('Host', '')}":
                 return "Cross-origin requests are not allowed."
         return None
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Movie-World-Token")
+        self.end_headers()
+
+    def handle_tizen(self, path):
+        token_path = ROOT / ".local" / "tizen-token"
+        expected = token_path.read_text().strip() if token_path.exists() else ""
+        supplied = self.headers.get("X-Movie-World-Token", "")
+        if not expected or not re.fullmatch(r"[a-f0-9]{32}", supplied) or not secrets.compare_digest(expected, supplied):
+            self.send_json({"error": "Pair this app with the PC token."}, 401)
+            return
+        if self.tv is None:
+            self.send_json({"error": "Playback service is disabled."}, 503)
+            return
+        body = self.read_json()
+        if body is None:
+            return
+        from tvplay.errors import PlaybackError
+        from tvplay.jobs import Busy, NotFound
+        manager = self.tv.manager
+        try:
+            if path == "/api/tizen/prepare":
+                movie_id = body.get("movie_id")
+                movie = movie_detail(movie_id) if type(movie_id) is int else None
+                if movie is None:
+                    self.send_json({"error": "Movie not found"}, 404)
+                    return
+                job, created = self.tv.call(manager.create(movie, "tizen:" + self.client_address[0], body.get("idempotency_key"), False, body.get("start_at")))
+                job = self.tv.call(manager.app_status(job["id"]))
+                self.send_json({"job": job}, 202 if created else 200)
+                return
+            match = re.fullmatch(r"/api/tizen/([0-9a-f]{32})/(status|progress|cancel)", path)
+            if not match:
+                self.send_json({"error": "Not found"}, 404)
+                return
+            job_id, action = match.groups()
+            current = self.tv.call(manager.get(job_id))
+            if current["renderer"]["id"] != "tizen:" + self.client_address[0]:
+                self.send_json({"error": "Session belongs to another device."}, 403)
+                return
+            if action == "progress":
+                result = self.tv.call(manager.app_progress(job_id, body))
+            elif action == "cancel":
+                result = self.tv.call(manager.cancel(job_id))
+            else:
+                result = self.tv.call(manager.app_status(job_id))
+            self.send_json({"job": result})
+        except Busy:
+            self.send_json({"error": "Another movie is active. Stop it first."}, 409)
+        except NotFound:
+            self.send_json({"error": "Session not found"}, 404)
+        except PlaybackError as exc:
+            self.send_json({"error": exc.message, "code": exc.code}, 400)
+
+        except (TimeoutError, OSError) as exc:
+            self.send_json({"error": "PC playback service unavailable. Try again.", "code": "unavailable"}, 503)
 
     def read_json(self):
         try:
@@ -674,6 +738,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()

@@ -49,6 +49,10 @@ To start it automatically each time you sign in to Windows:
 
 ### Samsung RU7100 TV interface
 
+For the privately installed Tizen app with in-app playback, see
+[Samsung app build and installation](docs/tizen-app.md). Signing and physical-TV
+acceptance are required before treating that app as verified on the RU7100.
+
 For the Samsung **UA65RU7100WXXY** (2019), open **http://192.168.0.20/tv**
 on the TV. Both `/tv` and `/tv/` work.
 Start the server with the command above; restart an already running server after

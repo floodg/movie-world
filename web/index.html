@@ -21,7 +21,9 @@
     </div>
     <div class="top-actions">
       <p class="tagline">Genres, highest rated first</p>
-      <div class="header-tools">
+      <div class="header-menu" id="header-menu">
+        <button type="button" id="header-menu-toggle" class="fav-link" aria-expanded="false" aria-controls="header-tools">Menu <span aria-hidden="true">▾</span></button>
+        <div class="header-tools" id="header-tools">
         <div class="year-filter" id="year-filter">
           <button type="button" id="year-filter-open" class="filter-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="year-filter-panel">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -30,7 +32,7 @@
               <circle cx="15" cy="12" r="2.2" fill="currentColor"/>
               <circle cx="8" cy="17" r="2.2" fill="currentColor"/>
             </svg>
-            <span class="visually-hidden">Year filter</span>
+            <span class="year-filter-label">Year filter</span>
             <span id="year-filter-summary" class="filter-summary" hidden></span>
           </button>
           <div id="year-filter-panel" class="year-panel" role="dialog" aria-label="Year filter" hidden>
@@ -57,6 +59,7 @@
           Favourites
           <span id="favourites-count">0</span>
         </button>
+        <button type="button" id="history-open" class="fav-link" aria-haspopup="dialog" aria-controls="history">History</button>
         <div id="account" class="account" hidden>
           <button type="button" id="account-toggle" class="account-toggle" aria-haspopup="dialog" aria-controls="account-panel">
             Account
@@ -91,6 +94,7 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
   </header>
   <main>
@@ -102,15 +106,17 @@
       </div>
       <div id="continue-watching-row" class="scroller"></div>
     </section>
-    <section id="recently-watched" class="favourites" aria-labelledby="recently-watched-heading" hidden>
-      <div class="rail-bar">
-        <div class="rail-heading"><h2 id="recently-watched-heading">Recently Watched</h2></div>
-      </div>
-      <div id="recently-watched-row" class="scroller"></div>
-    </section>
     <section id="genres" class="genre-grid" aria-label="Genres"></section>
     <section id="rail" class="rail" hidden aria-live="polite"></section>
   </main>
+  <dialog id="history" aria-labelledby="history-heading">
+    <div class="rail-bar">
+      <h2 id="history-heading">Watch History</h2>
+      <button type="button" id="history-close" autofocus>Close</button>
+    </div>
+    <p id="history-status" class="rail-status" role="status"></p>
+    <div id="history-movies" class="results-grid"></div>
+  </dialog>
   <dialog id="detail" aria-label="Movie details"></dialog>
   <script src="/cloud-config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
