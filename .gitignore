@@ -6,3 +6,5 @@ __pycache__/
 *.sqlite-wal
 *.sqlite-shm
 .local/
+web/cloud-config.js
+

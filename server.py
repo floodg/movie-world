@@ -542,6 +542,9 @@ class Handler(BaseHTTPRequestHandler):
             elif parts == ["api", "resume"] and method == "GET":
                 points = self.tv.call(manager.resume_points())
                 self.send_json({"points": points, "movies": continue_watching_movies(points)})
+            elif parts == ["api", "resume"] and method == "POST":
+                mirrored = self.tv.call(manager.mirror_resume_points(body.get("points") or []))
+                self.send_json({"points": mirrored})
             elif len(parts) == 3 and parts[:2] == ["api", "resume"] and method == "GET" and parts[2].isascii() and parts[2].isdigit():
                 self.send_json({"resume": self.tv.call(manager.resume_point(int(parts[2])))})
             elif parts == ["api", "playback", "active"] and method == "GET":

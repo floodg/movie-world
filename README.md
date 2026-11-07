@@ -7,7 +7,8 @@ A local movie catalogue browser built with Python, SQLite, and vanilla HTML, CSS
 - Browse genres with movies sorted by IMDb rating.
 - Search the catalogue by title or actor.
 - View movie details, posters, and backdrops.
-- Save favourites in your browser's local storage.
+- Save favourites in your browser's local storage, and optionally sync them with a Supabase account shared by the Android app.
+- Resume TV playback and recently watched titles sync through the same account when signed in.
 - Enrich movie metadata and cast information using TMDB.
 
 Titles tagged with the Adult genre are excluded from the browser.
@@ -24,7 +25,7 @@ python server.py
 
 Open http://127.0.0.1:8765 in your browser. Stop the server with Ctrl+C.
 
-The server reads the included `sql-lite/movie-world.sqlite` catalogue in read-only mode and listens on the local computer only. Poster and backdrop images require internet access. Favourites are stored per browser and are not written to the database.
+The server reads the included `sql-lite/movie-world.sqlite` catalogue in read-only mode and listens on the local computer only. Poster and backdrop images require internet access. Favourites stay in the browser for offline use. With a cloud account configured (copy `web/cloud-config.example.js` to `web/cloud-config.js`), the Account control in the header signs in to Supabase and syncs favourites, resume points, and recently watched with the Android app. Telegram credentials, TV choice, and the catalogue stay on this PC. See `supabase/README.md`.
 
 ## View on a TV over the local network
 

@@ -10,6 +10,24 @@ def build():
     TARGET.mkdir(exist_ok=True)
     html = (WEB / "index.html").read_text(encoding="utf-8")
     html = html.replace('  <script src="/tvcast.js"></script>\n', '')
+    # Cloud account sync needs a modern browser; the 2019 TV build stays local-only.
+    html = re.sub(r'  <script src="/cloud-config\.js"></script>\n', '', html)
+    html = re.sub(r'  <script src="https://cdn\.jsdelivr\.net/npm/@supabase/supabase-js@2"></script>\n', '', html)
+    html = re.sub(r'  <script src="/cloud\.js"></script>\n', '', html)
+    html = re.sub(
+        r'\n        <div id="account" class="account" hidden>.*?</div>\n        </div>\n',
+        '\n        </div>\n',
+        html,
+        count=1,
+        flags=re.S,
+    )
+    html = re.sub(
+        r'\n    <section id="recently-watched".*?</section>',
+        '',
+        html,
+        count=1,
+        flags=re.S,
+    )
     html = html.replace('/styles.css', '/tv/styles.css').replace('/app.js', '/tv/app.js')
     html = html.replace('<script src="/tv/app.js">', '<script src="/tv/compat.js"></script>\n  <script src="/tv/app.js">')
     html = html.replace('<title>Movie World</title>', '<title>Movie World TV</title>')

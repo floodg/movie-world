@@ -208,13 +208,85 @@ class JobManager:
         return self.snapshot(row)
 
     async def resume_point(self, movie_id):
-        return store.query_one("SELECT position, duration FROM resume_points WHERE movie_id = ?", (movie_id,))
+        return store.query_one(
+            "SELECT movie_id, position, duration, updated_at FROM resume_points WHERE movie_id = ?",
+            (movie_id,),
+        )
 
     async def resume_points(self):
         return store.query_all(
-            "SELECT movie_id, position, duration FROM resume_points "
+            "SELECT movie_id, position, duration, updated_at FROM resume_points "
             "WHERE duration > 0 ORDER BY updated_at DESC, movie_id"
         )
+
+    async def mirror_resume_points(self, points):
+        """Write cloud- or browser-merged resume rows into the LAN store used by Play on TV."""
+        if not isinstance(points, list):
+            raise PlaybackError("Resume points must be a list.", "bad_request")
+        mirrored = []
+        for item in points:
+            if not isinstance(item, dict):
+                raise PlaybackError("Each resume point must be an object.", "bad_request")
+            movie_id = item.get("movie_id")
+            if not isinstance(movie_id, int) or isinstance(movie_id, bool) or movie_id <= 0:
+                raise PlaybackError("Choose a valid movie.", "bad_request")
+            clear = item.get("clear") is True or item.get("finished") is True
+            if clear:
+                store.execute("DELETE FROM resume_points WHERE movie_id = ?", (movie_id,))
+                mirrored.append({"movie_id": movie_id, "cleared": True})
+                continue
+            position = item.get("position")
+            duration = item.get("duration")
+            if not isinstance(position, (int, float)) or isinstance(position, bool) or position < 0:
+                raise PlaybackError("Invalid resume position.", "bad_request")
+            if duration is not None and (
+                not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration < 0
+            ):
+                raise PlaybackError("Invalid resume duration.", "bad_request")
+            updated_at = item.get("updated_at")
+            if updated_at is None:
+                updated_at = store.now()
+            elif not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool) or updated_at <= 0:
+                raise PlaybackError("Invalid resume timestamp.", "bad_request")
+            existing = store.query_one(
+                "SELECT updated_at FROM resume_points WHERE movie_id = ?", (movie_id,)
+            )
+            if existing and existing["updated_at"] > updated_at:
+                mirrored.append(
+                    {
+                        "movie_id": movie_id,
+                        "position": None,
+                        "duration": None,
+                        "updated_at": existing["updated_at"],
+                        "skipped": True,
+                    }
+                )
+                continue
+            position = int(position)
+            duration = None if duration is None else int(duration)
+            if duration and position >= min(duration - 90, duration * 0.95):
+                store.execute("DELETE FROM resume_points WHERE movie_id = ?", (movie_id,))
+                mirrored.append({"movie_id": movie_id, "cleared": True})
+                continue
+            if position < RESUME_MIN_SECONDS:
+                store.execute("DELETE FROM resume_points WHERE movie_id = ?", (movie_id,))
+                mirrored.append({"movie_id": movie_id, "cleared": True})
+                continue
+            store.execute(
+                """INSERT INTO resume_points (movie_id, position, duration, updated_at) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(movie_id) DO UPDATE SET position = excluded.position,
+                   duration = excluded.duration, updated_at = excluded.updated_at""",
+                (movie_id, position, duration, float(updated_at)),
+            )
+            mirrored.append(
+                {
+                    "movie_id": movie_id,
+                    "position": position,
+                    "duration": duration,
+                    "updated_at": float(updated_at),
+                }
+            )
+        return mirrored
 
     async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None):
         if start_at is not None and (

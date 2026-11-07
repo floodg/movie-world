@@ -254,6 +254,96 @@ button, a { font: inherit; }
   border-color: white;
 }
 
+.account {
+  position: relative;
+}
+
+.account-toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: white;
+  cursor: pointer;
+}
+
+.account-toggle:hover,
+.account-toggle:focus-visible {
+  border-color: white;
+}
+
+.account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--elevated);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.account-panel label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.account-panel input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #121212;
+  color: var(--text);
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.account-actions button {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: white;
+  cursor: pointer;
+}
+
+.account-actions button:hover,
+.account-actions button:focus-visible {
+  border-color: white;
+}
+
+#account-sign-in,
+#account-save-name {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.account-status,
+.account-name {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.account-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .brand {
   margin: 0;
   font-size: 1.6rem;

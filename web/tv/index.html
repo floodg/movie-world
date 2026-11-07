@@ -21,15 +21,55 @@
     </div>
     <div class="top-actions">
       <p class="tagline">Genres, highest rated first</p>
-      <button type="button" id="favourites-jump" class="fav-link">
-        Favourites
-        <span id="favourites-count">0</span>
-      </button>
+      <div class="header-tools">
+        <div class="year-filter" id="year-filter">
+          <button type="button" id="year-filter-open" class="filter-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="year-filter-panel">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/>
+              <circle cx="9" cy="7" r="2.2" fill="currentColor"/>
+              <circle cx="15" cy="12" r="2.2" fill="currentColor"/>
+              <circle cx="8" cy="17" r="2.2" fill="currentColor"/>
+            </svg>
+            <span class="visually-hidden">Year filter</span>
+            <span id="year-filter-summary" class="filter-summary" hidden></span>
+          </button>
+          <div id="year-filter-panel" class="year-panel" role="dialog" aria-label="Year filter" hidden>
+            <p class="year-panel-title">Year</p>
+            <div id="decade-grid" class="decade-grid" role="group" aria-label="Decades"></div>
+            <p class="year-hint">Or add one year, or a from–to range.</p>
+            <form id="year-range-form" class="year-range-form">
+              <div class="year-range-fields">
+                <label>From
+                  <input id="year-from" inputmode="numeric" maxlength="4" placeholder="1984" autocomplete="off">
+                </label>
+                <label>To
+                  <input id="year-to" inputmode="numeric" maxlength="4" placeholder="1989" autocomplete="off">
+                </label>
+                <button type="submit">Add</button>
+              </div>
+              <p id="year-range-error" class="year-range-error" hidden></p>
+            </form>
+            <div id="year-ranges" class="year-ranges"></div>
+            <button type="button" id="year-filter-clear" class="year-clear" hidden>Clear years</button>
+          </div>
+        </div>
+        <button type="button" id="favourites-jump" class="fav-link">
+          Favourites
+          <span id="favourites-count">0</span>
+        </button>
+        </div>
+      </div>
     </div>
   </header>
   <main>
     <section id="results" class="results" hidden aria-live="polite"></section>
     <section id="favourites" class="favourites" aria-labelledby="favourites-heading"></section>
+    <section id="continue-watching" class="favourites" aria-labelledby="continue-watching-heading" hidden>
+      <div class="rail-bar">
+        <div class="rail-heading"><h2 id="continue-watching-heading">Continue Watching</h2></div>
+      </div>
+      <div id="continue-watching-row" class="scroller"></div>
+    </section>
     <section id="genres" class="genre-grid" aria-label="Genres"></section>
     <section id="rail" class="rail" hidden aria-live="polite"></section>
   </main>
