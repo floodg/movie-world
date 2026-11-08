@@ -397,6 +397,59 @@ def movie_detail(movie_id):
     }
 
 
+def tizen_home(day):
+    """Match Android Catalogue.featured/topRated and its six popular genre rows."""
+    rank = "m.imdb_rating IS NULL, m.imdb_rating DESC, m.imdb_votes DESC, m.title COLLATE NOCASE"
+    columns = "m.id, COALESCE(m.title,m.source_title) AS title,m.release_year,m.imdb_rating,m.imdb_votes,m.poster_url,m.media_type"
+    top = query_all(f"SELECT {columns} FROM movies m WHERE {not_excluded()} AND m.imdb_rating IS NOT NULL ORDER BY {rank} LIMIT 24")
+    featured = query_one(f"SELECT m.id FROM movies m WHERE {not_excluded()} AND m.backdrop_url IS NOT NULL AND m.imdb_rating IS NOT NULL ORDER BY {rank} LIMIT 1 OFFSET ?", (day % 40,))
+    if featured is None:
+        featured = query_one(f"SELECT m.id FROM movies m WHERE {not_excluded()} AND m.backdrop_url IS NOT NULL ORDER BY {rank} LIMIT 1")
+    available = genres()
+    rows = []
+    for genre in available[:6]:
+        movies = query_all(f"SELECT {columns} FROM movies m JOIN movie_genres mg ON mg.movie_id=m.id WHERE mg.genre_id=? AND {not_excluded()} ORDER BY {rank} LIMIT 24", (genre['id'],))
+        rows.append({"genre": genre, "movies": [movie_card(m) for m in movies]})
+    return {"featured": movie_detail(featured['id']) if featured else None, "top_rated": [movie_card(m) for m in top], "genres": available, "rows": rows}
+
+
+def tizen_search(params):
+    term = ' '.join(params.get('q', [''])[0].split())[:80]
+    clause, years = year_sql(parse_year_ranges(params.get('years', [''])[0]))
+    conditions = [not_excluded()]
+    values = []
+    genre = params.get('genre', [''])[0]
+    if genre:
+        conditions.append('EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.movie_id=m.id AND mg.genre_id=?)')
+        values.append(genre)
+    actor_id = params.get('actor_id', [''])[0] if params.get('mode', ['title'])[0] == 'actor' else ''
+    if actor_id:
+        conditions.append('EXISTS (SELECT 1 FROM movie_actors ma WHERE ma.movie_id=m.id AND ma.actor_id=?)')
+        values.append(actor_id)
+    elif term:
+        escaped = term.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        if params.get('mode', ['title'])[0] == 'actor':
+            if not table_exists('actors'):
+                return {"movies": []}
+            conditions.append("EXISTS (SELECT 1 FROM movie_actors ma JOIN actors a ON a.id=ma.actor_id WHERE ma.movie_id=m.id AND a.name LIKE ? ESCAPE '\\')")
+        else:
+            conditions.append("COALESCE(m.title,m.source_title) LIKE ? ESCAPE '\\'")
+        values.append('%' + escaped + '%')
+    limit = '' if actor_id else 'LIMIT 120'
+    rows = query_all(f"""SELECT m.id,COALESCE(m.title,m.source_title) AS title,m.release_year,m.imdb_rating,m.imdb_votes,m.poster_url,m.media_type
+        FROM movies m WHERE {' AND '.join(conditions)} {clause}
+        ORDER BY m.imdb_rating IS NULL,m.imdb_rating DESC,m.imdb_votes DESC,title COLLATE NOCASE {limit}""", (*values, *years))
+    return {"movies": [movie_card(m) for m in rows]}
+
+
+def tizen_similar(movie_id):
+    rows = query_all(f"""SELECT m.id,COALESCE(m.title,m.source_title) AS title,m.release_year,m.imdb_rating,m.imdb_votes,m.poster_url,m.media_type
+        FROM movies m JOIN movie_genres mg ON mg.movie_id=m.id WHERE m.id<>? AND {not_excluded()}
+        AND mg.genre_id IN (SELECT genre_id FROM movie_genres WHERE movie_id=?) GROUP BY m.id
+        ORDER BY COUNT(*) DESC,m.imdb_rating IS NULL,m.imdb_rating DESC,m.imdb_votes DESC LIMIT 24""", (movie_id,movie_id))
+    return [movie_card(m) for m in rows]
+
+
 def static_file(url_path):
     if url_path == "/":
         url_path = "/index.html"
@@ -421,6 +474,8 @@ def is_tv_route(path):
 
 class Handler(BaseHTTPRequestHandler):
     tv = None
+    personal = None
+    personal_sync = None
     secure = False
 
     def log_message(self, fmt, *args):
@@ -429,6 +484,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        if path in ("/api/personal", "/api/personal/merge", "/api/personal/sync"):
+            self.handle_personal("GET", path)
+            return
         if path.startswith("/api/"):
             if is_tv_route(path):
                 self.handle_tv("GET", path, parsed.query)
@@ -440,6 +498,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        if path in ("/api/personal", "/api/personal/merge", "/api/personal/sync"):
+            self.handle_personal("POST", path)
+            return
         if path.startswith("/api/tizen/"):
             self.handle_tizen(path)
             return
@@ -450,6 +511,44 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Not found"}, 404)
             return
         self.handle_tv("POST", path, parsed.query)
+
+    def handle_personal(self, method, path):
+        if self.personal is None:
+            self.send_json({"error": "Personal storage is unavailable"}, 503)
+            return
+        if self.headers.get("Sec-Fetch-Site") not in (None, "same-origin", "none"):
+            self.send_json({"error": "Cross-site requests are not allowed"}, 403)
+            return
+        origin = self.headers.get("Origin")
+        expected = ("https" if self.secure else "http") + "://" + self.headers.get("Host", "")
+        if origin and origin != expected:
+            self.send_json({"error": "Cross-origin requests are not allowed"}, 403)
+            return
+        if method == "GET" and path != "/api/personal":
+            self.send_json({"error": "Method not allowed"}, 405)
+            return
+        if method == "POST":
+            problem = self.cross_site_problem()
+            if problem:
+                self.send_json({"error": problem}, 403)
+                return
+            body = self.read_json()
+            if body is None: return
+            try:
+                if path == "/api/personal/merge": self.personal.browser_merge(body)
+                elif path != "/api/personal/sync":
+                    self.send_json({"error": "Method not allowed"}, 405)
+                    return
+            except (ValueError, TypeError, KeyError):
+                self.send_json({"error": "Invalid personal data or account changed; reload this page"}, 409)
+                return
+            if self.personal_sync: self.personal_sync.request(force=path == "/api/personal/sync")
+        snapshot = self.personal.snapshot()
+        status = self.personal_sync.status if self.personal_sync else {
+            "message": "Saved on this PC; install playback requirements and configure PC Telegram for sync",
+            "lastSync": 0, "pending": True,
+        }
+        self.send_json({"scope": str(snapshot["accountId"]) if snapshot["accountId"] else "local", "snapshot": snapshot, "status": status})
 
     def handle_upload(self, path):
         from tvplay.errors import PlaybackError
@@ -601,7 +700,7 @@ class Handler(BaseHTTPRequestHandler):
         token_path = ROOT / ".local" / "tizen-token"
         expected = token_path.read_text().strip() if token_path.exists() else ""
         supplied = self.headers.get("X-Movie-World-Token", "")
-        if not expected or not re.fullmatch(r"[a-f0-9]{32}", supplied) or not secrets.compare_digest(expected, supplied):
+        if not expected or not re.fullmatch(r"[0-9]{6}", supplied) or not secrets.compare_digest(expected, supplied):
             self.send_json({"error": "Pair this app with the PC token."}, 401)
             return
         if self.tv is None:
@@ -670,6 +769,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_api(self, path, query):
         parts = [part for part in path.split("/") if part]
+        if path == "/api/tizen-catalogue/home":
+            raw = parse_qs(query).get('day', ['1'])[0]
+            self.send_json(tizen_home(int(raw) if raw.isascii() and raw.isdigit() and len(raw)<4 else 1))
+            return
+        if path == "/api/tizen-catalogue/search":
+            self.send_json(tizen_search(parse_qs(query)))
+            return
+        if len(parts) == 4 and parts[:2] == ['api', 'movies'] and parts[3] == 'similar':
+            movie_id = parse_id(parts[2])
+            self.send_json(tizen_similar(movie_id) if movie_id is not None else [])
+            return
         if parts == ["api", "genres"]:
             self.send_json(genres())
             return
@@ -738,7 +848,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if not self.path.startswith("/api/personal"):
+            self.send_header("Access-Control-Allow-Origin", "*")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
@@ -775,12 +886,25 @@ def main():
         scheme = "https"
     Handler.secure = scheme == "https"
     tv = start_tv_playback(args) if args.tv_playback else None
+    from tvplay.personal import PersonalStore
+    from tvplay import config as personal_config
+    Handler.personal = PersonalStore(personal_config.JOBS_DB)
+    personal_runtime = None
+    try:
+        from tvplay.personal_sync import PersonalRuntime
+        personal_runtime = PersonalRuntime(Handler.personal, personal_config.load(), tv)
+        personal_runtime.start()
+        Handler.personal_sync = personal_runtime
+    except ImportError:
+        print("Telegram sync unavailable; local personal storage enabled. Install requirements.txt.", flush=True)
     print(f"Movie World at {scheme}://{args.host}:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if personal_runtime is not None:
+            personal_runtime.stop()
         if tv is not None:
             tv.stop()
 

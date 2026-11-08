@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Movie World</title><link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css">
+</head><body>
+  <header class="top">
+    <a class="wordmark" href="#home" aria-label="Movie World Home"><span>MOVIE</span><span>WORLD</span></a>
+    <button id="settings-open" class="icon-button" aria-label="TV settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h18v14H9M3 13a8 8 0 0 1 8 8M3 17a4 4 0 0 1 4 4M3 21h.01"/></svg></button>
+  </header>
+  <main id="screen" tabindex="-1" aria-label="Home"></main>
+  <nav class="tabs" aria-label="Main navigation">
+    <button data-tab="home" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v11h-6v-7H9v7H3z"/></svg><span>Home</span></button>
+    <button data-tab="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span>Search</span></button>
+    <button data-tab="list"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>My List</span></button>
+  </nav>
+  <section id="detail" class="detail" role="dialog" aria-modal="true" aria-label="Movie details" hidden></section>
+  <section id="connection" class="settings-panel" role="dialog" aria-modal="true" aria-label="TV settings" hidden>
+    <form id="connection-form">
+      <button type="button" class="back" id="settings-close" aria-label="Back">←</button>
+      <h1>TV settings</h1><p class="muted">Connect Movie World to your PC</p>
+      <label for="mw-host">PC address</label><input id="mw-host" placeholder="http://192.168.0.20" autocomplete="off">
+      <label for="mw-secret">Pairing code</label><input id="mw-secret" type="password" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="off">
+      <p class="muted">Enter the 6-digit code generated on your PC during setup.</p>
+      <button class="primary">Save and connect</button><p id="mw-error" role="alert"></p>
+    </form>
+  </section>
+  <script src="$WEBAPIS/webapis/webapis.js"></script><script src="tizen.js"></script><script src="app.js"></script>
+</body></html>

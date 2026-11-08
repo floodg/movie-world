@@ -7,8 +7,8 @@ A local movie catalogue browser built with Python, SQLite, and vanilla HTML, CSS
 - Browse genres with movies sorted by IMDb rating.
 - Search the catalogue by title or actor.
 - View movie details, posters, and backdrops.
-- Save favourites in your browser's local storage, and optionally sync them with a Supabase account shared by the Android app.
-- Resume TV playback and recently watched titles sync through the same account when signed in.
+- Save favourites in PC SQLite, keep a browser cache for offline use, and sync with Android through Telegram Saved Messages.
+- Resume TV playback and recently watched titles sync through the same Telegram account.
 - Enrich movie metadata and cast information using TMDB.
 
 Titles tagged with the Adult genre are excluded from the browser.
@@ -25,7 +25,20 @@ python server.py
 
 Open http://127.0.0.1:8765 in your browser. Stop the server with Ctrl+C.
 
-The server reads the included `sql-lite/movie-world.sqlite` catalogue in read-only mode and listens on the local computer only. Poster and backdrop images require internet access. Favourites stay in the browser for offline use. With a cloud account configured (copy `web/cloud-config.example.js` to `web/cloud-config.js`), the Account control in the header signs in to Supabase and syncs favourites, resume points, and recently watched with the Android app. Telegram credentials, TV choice, and the catalogue stay on this PC. See `supabase/README.md`.
+The server reads the included `sql-lite/movie-world.sqlite` catalogue in read-only mode. Personal data is stored separately in `.local/jobs.sqlite`, alongside existing playback state. Browser favourites and history are adopted once per account, and existing PC resume points are preserved. The browser retains an offline cache and queues edits until the PC is reachable.
+
+### Personal data sync with Android
+
+Install `requirements.txt` and configure the PC Telegram login using the existing playback setup below. The server syncs automatically through that account's Saved Messages, including without `--tv-playback`. With playback enabled, sync shares the existing Telegram client and worker rather than opening another session. Without the optional packages or a working Telegram login, local SQLite and browser caches remain usable.
+
+Open **PC sync** in the browser header to see status or request **Sync now**. There is no Supabase login, CDN SDK, or cloud-config requirement. The Android app must use the same Telegram account. The PC and Android exchange the same version-1 JSON format; records merge individually by timestamp and device ID, including removals, completion and deliberate playback resets. Account changes isolate local records and browser caches.
+
+PC playback polls the TV about every three seconds and saves locally at most every 15 seconds, with existing pause/stop flushes. Server-owned tracking continues with browser tabs closed. Telegram uploads are limited to about once per minute; pause/stop and manual sync can flush sooner. The browser refreshes from PC storage every 15 seconds and when it returns to the foreground. Network and Telegram rate-limit failures keep local data and retry automatically while the PC server runs.
+
+Each device keeps its latest two snapshots. Older copies are deleted only if retained backups cover their records; filenames with hyphens or Telegram-normalized underscores are supported. Cleanup is restricted to this PC's snapshots. Credentials, session files, movie downloads, catalogue and TV settings are excluded from snapshots. Saved Messages uses ordinary Telegram cloud storage, without a separate encryption password. Keep this server on the trusted LAN; personal-data routes reject cross-origin requests and do not expose CORS access.
+
+The legacy `supabase/` SQL and documentation remain as historical source data. The server does not query or delete that project, and this change does not perform the previously blocked Supabase export. Existing Telegram snapshots and local/browser data are sufficient for normal PC/Android sync.
+
 
 ## View on a TV over the local network
 

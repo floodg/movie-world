@@ -61,38 +61,15 @@
         </button>
         <button type="button" id="history-open" class="fav-link" aria-haspopup="dialog" aria-controls="history">History</button>
         <div id="account" class="account" hidden>
-          <button type="button" id="account-toggle" class="account-toggle" aria-haspopup="dialog" aria-controls="account-panel">
-            Account
-          </button>
-          <div id="account-panel" class="account-panel" role="dialog" aria-label="Account" hidden>
-            <p id="account-status" class="account-status">Signed out</p>
-            <div id="account-form">
-              <label>Email
-                <input id="account-email" type="email" autocomplete="username" maxlength="120">
-              </label>
-              <label>Password
-                <input id="account-password" type="password" autocomplete="current-password" maxlength="72">
-              </label>
-              <label>Display name
-                <input id="account-name-input" type="text" autocomplete="nickname" maxlength="80" placeholder="Optional">
-              </label>
-              <div class="account-actions">
-                <button type="button" id="account-sign-in">Sign in</button>
-                <button type="button" id="account-sign-up">Sign up</button>
-              </div>
-            </div>
-            <div id="account-signed" hidden>
-              <p class="account-name"><span id="account-display-name"></span></p>
-              <label>Display name
-                <input id="account-name-edit" type="text" maxlength="80">
-              </label>
-              <div class="account-actions">
-                <button type="button" id="account-save-name">Save name</button>
-                <button type="button" id="account-sign-out">Sign out</button>
-              </div>
-            </div>
+          <button type="button" id="account-toggle" class="account-toggle" aria-haspopup="dialog" aria-controls="account-panel">PC sync</button>
+          <div id="account-panel" class="account-panel" role="dialog" aria-label="Personal data sync" hidden>
+            <p id="account-status" class="account-status">Connecting to PC storage...</p>
+            <p>Favourites and watch history stay on this PC and sync with Android through Telegram Saved Messages.</p>
+            <p id="account-last-sync"></p>
+            <div class="account-actions"><button type="button" id="account-sync-now">Sync now</button></div>
           </div>
         </div>
+      </div>
       </div>
       </div>
     </div>
@@ -118,8 +95,6 @@
     <div id="history-movies" class="results-grid"></div>
   </dialog>
   <dialog id="detail" aria-label="Movie details"></dialog>
-  <script src="/cloud-config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/cloud.js"></script>
   <script src="/tvcast.js"></script>
   <script src="/app.js"></script>

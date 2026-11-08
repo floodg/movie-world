@@ -16,15 +16,22 @@
   var av = window.webapis && window.webapis.avplay;
   var surface = document.createElement('object');
   surface.type = 'application/avplayer';
-  surface.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;z-index:-1';
+  surface.className = 'av-surface';
+  surface.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;z-index:0';
   document.body.appendChild(surface);
   var readyResolve;
   var ready = new Promise(function (resolve) { readyResolve = resolve; });
   var status = document.createElement('div');
-  status.style.cssText = 'position:fixed;bottom:25px;left:30px;z-index:10002;background:#142238;color:white;padding:14px;font-size:24px';
+  status.className = 'player-status';
+  status.setAttribute('role', 'status');
+  var statusTitle = document.createElement('strong');
+  var statusText = document.createElement('span');
+  var statusStop = document.createElement('button');
+  statusStop.textContent = 'Stop'; statusStop.onclick = function () { close(); };
+  status.appendChild(statusTitle); status.appendChild(statusText); status.appendChild(statusStop);
   status.hidden = true;
   document.body.appendChild(status);
-  function message(text) { status.textContent = text; status.hidden = !text; }
+  function message(text) { statusText.textContent = text; status.hidden = !text; statusStop.hidden = !job && !opening; }
   function request(method, path, data) {
     return ready.then(function () {
       return new Promise(function (resolve, reject) {
@@ -54,31 +61,29 @@
   };
   function settings() {
     if (job || opening) close();
-    var detail = document.getElementById('detail');
-    if (detail.hasAttribute('open') && detail.close) detail.close();
-    var panel = document.createElement('form');
-    panel.style.cssText = 'position:fixed;top:50px;right:50px;bottom:50px;left:50px;z-index:10010;background:#142238;color:white;padding:45px;font-size:28px';
-    panel.innerHTML = '<h1>Connect to Movie World PC</h1><p>PC address (for example http://192.168.0.20)</p><input id="mw-host" style="width:90%"><p>Pairing token from scripts/pair_tizen.py</p><input id="mw-secret" type="password" style="width:90%"><p><button>Save and connect</button></p><p id="mw-error"></p>';
-    document.body.appendChild(panel);
+    var panel = document.getElementById('connection');
+    panel.hidden = false;
     panel.querySelector('#mw-host').value = base;
     panel.querySelector('#mw-secret').value = token;
-    panel.onsubmit = function (event) {
+    document.getElementById('connection-form').onsubmit = function (event) {
       event.preventDefault();
       var address = panel.querySelector('#mw-host').value.trim().replace(/\/$/, '');
       var secret = panel.querySelector('#mw-secret').value.trim();
-      if (!/^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(address) || !/^[a-f0-9]{32}$/.test(secret)) {
-        panel.querySelector('#mw-error').textContent = 'Enter a private LAN HTTP address and the 32-character pairing token.'; return;
+      if (!/^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(address) || !/^[0-9]{6}$/.test(secret)) {
+        panel.querySelector('#mw-error').textContent = 'Enter a private LAN HTTP address and the 6-digit pairing code.'; return;
       }
       base = address; token = secret;
       localStorage.setItem('mw-pc', base); localStorage.setItem('mw-token', token);
-      panel.remove(); readyResolve(); location.reload();
+      panel.hidden = true; readyResolve(); location.reload();
     };
     panel.querySelector('input').focus();
   }
-  var settingsButton = document.createElement('button');
-  settingsButton.textContent = 'PC Settings';
-  settingsButton.onclick = settings;
-  document.querySelector('.top').appendChild(settingsButton);
+  document.getElementById('settings-open').onclick = settings;
+  document.getElementById('settings-close').onclick = function () {
+    if (!base || !token) { document.getElementById('mw-error').textContent = 'Connect to the PC to browse your catalogue.'; return; }
+    document.getElementById('connection').hidden = true;
+    document.getElementById('settings-open').focus();
+  };
   if (base && token) readyResolve(); else settings();
 
   function report(state) {
@@ -90,6 +95,7 @@
       }
     } catch (e) { /* Preserve the last known position. */ }
     job.position = position; job.duration = duration;
+    window.dispatchEvent(new CustomEvent('mw-progress', {detail:{movie_id:job.movie_id,title:job.title,position:position,duration:duration,state:state}}));
     return request('POST', '/api/tizen/' + job.id + '/progress', {state:state, position:position, duration:duration});
   }
   function close(state) {
@@ -102,11 +108,12 @@
     job = null;
     try { if (av) av.close(); } catch (e) { /* Already closed. */ }
     document.body.classList.remove('mw-playing');
-    if (document.getElementById('detail').hasAttribute('open')) {
+    if (!document.getElementById('detail').hidden) {
       var button = document.getElementById('detail').querySelector('button');
       if (button) button.focus();
     }
     message('');
+    window.dispatchEvent(new CustomEvent('mw-playback-closed'));
   }
   function fail(error) { close('failed'); message('Playback failed: ' + (error.message || error)); }
   function play(current) {
@@ -150,26 +157,21 @@
       polling = setTimeout(poll, 1500);
     }).catch(function (e) { if (version === generation) fail(e); });
   }
-  window.MovieWorldTv = {mount: function (actions, movie) {
-    var button = document.createElement('button');
-    button.textContent = 'Play on this TV';
-    button.onclick = function () {
+  window.MovieWorldTv = {settings:settings, stop:close, play:function (movie, restart) {
       if (job || opening) { message('Stop the current movie with Back first.'); return; }
+      statusTitle.textContent = movie.title;
       opening = true; message('Preparing movie…');
       var version = ++generation;
-      request('POST', '/api/tizen/prepare', {movie_id:movie.id, idempotency_key:'tv_' + Date.now()}).then(function (data) {
+      var body = {movie_id:movie.id, idempotency_key:'tv_' + Date.now()};
+      if (restart) body.start_at = 0;
+      request('POST', '/api/tizen/prepare', body).then(function (data) {
         if (version !== generation) { request('POST', '/api/tizen/' + data.job.id + '/cancel').catch(function () {}); return; }
         job = data.job; opening = false; poll();
       }).catch(function (e) { opening = false; message(e.message); });
-    };
-    actions.appendChild(button);
   }};
   document.addEventListener('keydown', function (event) {
     var key = event.keyCode;
     if (!job && !opening) {
-      if (key === 10009 && !document.getElementById('detail').hasAttribute('open')) {
-        event.preventDefault(); tizen.application.getCurrentApplication().exit();
-      }
       return;
     }
     if ([10009, 27, 13, 415, 19, 10252, 413, 37, 39, 412, 417].indexOf(key) < 0) return;
@@ -188,7 +190,4 @@
   document.addEventListener('visibilitychange', function () { if (document.hidden) close(); });
   window.addEventListener('pagehide', function () { close(); });
   try { ['MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop', 'MediaRewind', 'MediaFastForward'].forEach(function (key) { tizen.tvinputdevice.registerKey(key); }); } catch (e) { /* Browser preview. */ }
-  var style = document.createElement('style');
-  style.textContent = 'body.mw-playing{background:transparent!important}body.mw-playing>header,body.mw-playing>main,body.mw-playing>dialog,body.mw-playing>footer{visibility:hidden!important}';
-  document.head.appendChild(style);
 }());

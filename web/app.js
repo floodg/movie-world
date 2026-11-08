@@ -319,7 +319,12 @@ function enableMouseDrag(scroller) {
     // Leave the native scrollbar available for dragging too.
     if (event.clientY >= scroller.getBoundingClientRect().top + scroller.clientHeight) return;
     suppressClick = false;
-    drag = { id: event.pointerId, x: event.clientX, left: scroller.scrollLeft, active: false };
+    // Prevent native image dragging and button focus from interrupting the gesture.
+    event.preventDefault();
+    const target = event.target instanceof Element ? event.target : scroller;
+    target.setPointerCapture(event.pointerId);
+    drag = { id: event.pointerId, target, x: event.clientX, left: scroller.scrollLeft, active: false,
+      snap: scroller.style.scrollSnapType };
   });
   scroller.addEventListener("pointermove", (event) => {
     if (!drag || event.pointerId !== drag.id) return;
@@ -328,7 +333,7 @@ function enableMouseDrag(scroller) {
       if (Math.abs(distance) < 6) return;
       drag.active = true;
       suppressClick = true;
-      scroller.setPointerCapture(event.pointerId);
+      scroller.style.scrollSnapType = "none";
       scroller.classList.add("is-dragging");
     }
     event.preventDefault();
@@ -336,16 +341,15 @@ function enableMouseDrag(scroller) {
   });
   const finish = (event) => {
     if (!drag || event.pointerId !== drag.id) return;
+    const finished = drag;
     drag = null;
     scroller.classList.remove("is-dragging");
-    if (scroller.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+    scroller.style.scrollSnapType = finished.snap;
+    if (finished.target.hasPointerCapture(event.pointerId)) finished.target.releasePointerCapture(event.pointerId);
   };
   scroller.addEventListener("pointerup", finish);
   scroller.addEventListener("pointercancel", finish);
   scroller.addEventListener("lostpointercapture", finish);
-  scroller.addEventListener("pointerleave", (event) => {
-    if (drag && !drag.active) finish(event);
-  });
   scroller.addEventListener("dragstart", (event) => event.preventDefault());
   scroller.addEventListener("click", (event) => {
     if (!suppressClick || event.detail === 0) return;
@@ -439,8 +443,8 @@ async function renderHistory() {
     ? (cards.length ? "Latest watched first. " : "History titles are unavailable from this catalogue. ")
     : "Your watch history is empty. ";
   historyStatusEl.textContent += window.MovieWorldCloud?.session()
-    ? "History syncs with your account."
-    : "Saved on this browser. Sign in to sync history across devices.";
+    ? "History is saved on the PC and syncs through Telegram."
+    : "Saved on this browser while PC sync is unavailable.";
 }
 
 document.getElementById("history-open").addEventListener("click", async () => {
@@ -582,6 +586,24 @@ window.addEventListener("movie-world-progress", (event) => {
 });
 
 window.MovieWorldSync = {
+  async setAccountScope(scope) {
+    const key = "movie-world-pc-account";
+    const previous = localStorage.getItem(key);
+    if (previous && previous !== scope && previous !== "local") {
+      localStorage.setItem("movie-world-cache-" + previous, JSON.stringify({
+        favourites: loadFavouriteStore(), progress: loadLocalWatchStore(),
+      }));
+      let cache = {};
+      try { cache = JSON.parse(localStorage.getItem("movie-world-cache-" + scope) || "{}"); } catch (_) {}
+      saveFavouriteStore(cache.favourites || []);
+      favourites = loadFavourites();
+      watchStore = new Map();
+      localStorage.setItem(WATCH_LOCAL_KEY, JSON.stringify(cache.progress || []));
+      for (const point of cache.progress || []) upsertWatchPoint(point);
+      renderFavourites(); syncFavButtons(); await refreshWatchRails();
+    }
+    localStorage.setItem(key, scope);
+  },
   exportFavouritesForCloud() {
     return loadFavouriteStore().map((item) => ({
       movie_id: item.id,
@@ -627,7 +649,10 @@ window.MovieWorldSync = {
         if (result.status !== "fulfilled") continue;
         const movie = result.value;
         const index = favourites.findIndex((item) => item.id === movie.id);
-        if (index >= 0) favourites[index] = { ...favourites[index], ...favouriteSnapshot(movie), removed_at: null };
+        if (index >= 0) {
+          const saved = favourites[index];
+          favourites[index] = { ...saved, ...favouriteSnapshot(movie), updated_at: saved.updated_at, removed_at: saved.removed_at };
+        }
       }
       saveFavourites();
     }
@@ -655,7 +680,7 @@ window.MovieWorldSync = {
       });
       if (next) mirrored.push(next);
     }
-    if (mirrored.length) await mirrorResumeToLan(mirrored);
+    // The PC personal-data store already mirrors winning records into playback resume storage.
     await refreshWatchRails();
   },
 };

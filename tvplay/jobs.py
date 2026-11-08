@@ -57,6 +57,8 @@ class JobManager:
         self.reads = ActiveReads()
         self.cache = Cache(settings, self.reads)
         self.telegram = TelegramSource(settings)
+        self.personal = None
+        self.personal_sync = None
         self.registry = RendererRegistry(settings.get("renderer_urls") or [])
         self.media = MediaServer(self.resolve_media, port=int(settings.get("media_port") or 8766), reads=self.reads)
         self.jobs = {}
@@ -1064,6 +1066,9 @@ class JobManager:
                 await self._stop_renderer_quiet(job)
                 raise
         elif job.get("start_at") == 0:
+            if getattr(self, "personal", None) is not None:
+                self.personal.progress(job["movie_id"], 0, job.get("duration"))
+                if getattr(self, "personal_sync", None): self.personal_sync.request(force=True)
             store.execute("DELETE FROM resume_points WHERE movie_id = ?", (job["movie_id"],))
         self.cache.touch(entry["id"])
         self._set(job, "playing", self._playing_detail(job))
@@ -1124,6 +1129,12 @@ class JobManager:
         if not force and now - job.get("_resume_saved", 0) < RESUME_SAVE_SECONDS:
             return
         job["_resume_saved"] = now
+        personal = getattr(self, "personal", None)
+        if personal is not None:
+            personal.progress(job["movie_id"], position, duration,
+                              finished=bool(duration and position >= min(duration - 90, duration * 0.95)))
+            sync = getattr(self, "personal_sync", None)
+            if sync: sync.request(force=force)
         if duration and position >= min(duration - 90, duration * 0.95):
             store.execute("DELETE FROM resume_points WHERE movie_id = ?", (job["movie_id"],))
         elif position >= RESUME_MIN_SECONDS:
