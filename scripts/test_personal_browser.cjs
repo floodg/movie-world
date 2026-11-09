@@ -26,6 +26,15 @@ const {chromium} = require('../tizen/node_modules/@playwright/test');
     assert.equal(state.snapshot.progress[0].position,300);
     assert.equal(await page.locator('#account-email').count(),0);
     assert.equal(await page.locator('script[src*="supabase"]').count(),0);
+    await page.locator('#continue-watching .watch-action').click();
+    await page.waitForFunction(() => window.MovieWorldSync.exportWatchForCloud().some(r => r.movie_id===1305 && r.finished));
+    await page.evaluate(() => window.MovieWorldCloud.syncWatchProgress());
+    state=await (await page.request.get(base+'/api/personal')).json();
+    assert.equal(state.snapshot.progress.find(r=>r.movieId==='1305').finished,true);
+    assert.equal(await page.locator('#continue-watching').isVisible(),false);
+    await page.reload();
+    await page.waitForFunction(() => window.MovieWorldCloud.session());
+    assert.equal(await page.locator('#continue-watching').isVisible(),false);
     await page.request.post(base+'/api/personal/merge',{data:{scope:'local',
       favourites:[{movieId:'1305',updated:stamp+1000,removed:stamp+1000}],
       progress:[{movieId:'1305',updated:stamp+1000,position:0,duration:7200,finished:false}]}});

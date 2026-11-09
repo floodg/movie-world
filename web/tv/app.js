@@ -403,6 +403,36 @@ function applyWatchStoreToUi() {
     watchedProgress.set(String(point.movie_id), Math.min(100, 100 * point.position / point.duration));
   }
   for (const line of document.querySelectorAll(".watched-progress")) updateWatchedProgress(line);
+  for (const button of document.querySelectorAll(".watch-action")) {
+    const finished = Boolean(watchStore.get(button.dataset.movieId)?.finished);
+    button.textContent = finished ? "✓ Watched" : "Mark watched";
+    button.disabled = finished;
+  }
+}
+
+function watchedButton(movie) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "fav-action watch-action";
+  button.dataset.movieId = String(movie.id);
+  const finished = Boolean(watchStore.get(String(movie.id))?.finished);
+  button.textContent = finished ? "✓ Watched" : "Mark watched";
+  button.disabled = finished;
+  button.setAttribute("aria-label", `Mark ${movie.title} as watched`);
+  button.title = "Remove from Continue Watching and keep in watch history";
+  button.addEventListener("click", async () => {
+    const point = watchStore.get(String(movie.id));
+    upsertWatchPoint({
+      movie_id: movie.id,
+      position: point ? point.position : 0,
+      duration: point ? point.duration : null,
+      finished: true,
+      updated_at: Date.now() / 1000,
+    }, { mirror: true, pushCloud: true });
+    applyWatchStoreToUi();
+    await refreshWatchRails();
+  });
+  return button;
 }
 
 function renderContinueWatching() {
@@ -727,7 +757,7 @@ function movieCard(movie) {
   meta.className = "card-meta";
   meta.textContent = movie.year ? String(movie.year) : "";
   button.append(wrap, title, meta);
-  card.append(button, favToggle(movie));
+  card.append(button, favToggle(movie), watchedButton(movie));
   return card;
 }
 
@@ -1038,7 +1068,7 @@ function renderDetail(movie) {
   fav.append(heartIcon(), favLabel);
   applyFavState(fav);
   fav.addEventListener("click", () => toggleFavourite(movie));
-  actions.appendChild(fav);
+  actions.append(fav, watchedButton(movie));
   if (typeof movie.telegram_url === "string" && movie.telegram_url.startsWith("https://")) {
     const link = document.createElement("a");
     link.className = "telegram";

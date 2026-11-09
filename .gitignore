@@ -9,3 +9,4 @@ __pycache__/
 web/cloud-config.js
 tizen/node_modules/
 
+.codex-attachments/
