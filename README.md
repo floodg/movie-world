@@ -226,6 +226,8 @@ The console prints `Play on TV enabled. The TV fetches video on port 8766.` On t
 
 Settings in `.local/tvplay.json`: `cache_quota_gb` (default 50), `disk_headroom_gb`, `max_file_gb`, `media_host` (the PC's LAN IP, normally auto-detected), `renderer_urls` (TV description URLs if discovery fails, for example `http://<tv-ip>:9197/dmr`), and `media_port`. Downloads are cached in `.local/cache`. The least recently used inactive files are removed when the quota is reached.
 
+The Android app can optionally prefer this PC's completed cache. In **TV settings → Home PC**, enter the server's LAN address (for example `http://192.168.1.10`) and choose **Check and save PC**. Before a phone download, the app checks `GET /api/playback/cache/{movie_id}` over Wi-Fi. A cache hit starts a normal PC-controlled TV session with `cached_only: true`; a missing, incomplete, or unavailable cache falls back to phone playback. The cache-only request never downloads a missing movie on the PC. The app uses the newer phone/PC resume point, and Start over forces zero. Pause, resume, seek and stop go through the PC during a PC session. Explicitly selected phone video files keep using the phone. Reserve the PC's LAN address in the router so the saved address stays valid.
+
 A compatible title starts on the TV once the first portion has downloaded. The rest keeps
 downloading, and the finished file stays in the cache. Stopping the TV while that download
 is still going leaves it running so the file is kept. Resume uses that finished file and asks

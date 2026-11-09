@@ -291,7 +291,11 @@ class JobManager:
             )
         return mirrored
 
-    async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None):
+    async def cached_movie(self, movie):
+        channel, message = parse_message_link(movie.get("telegram_url"))
+        return self.cache.lookup(channel, message)
+
+    async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None, cached_only=False):
         if start_at is not None and (
             not isinstance(start_at, (int, float)) or isinstance(start_at, bool) or not math.isfinite(start_at) or start_at < 0
         ):
@@ -304,6 +308,9 @@ class JobManager:
                 return await self.get(existing["id"]), False
         parse_message_link(movie.get("telegram_url"))
         channel, message = parse_message_link(movie.get("telegram_url"))
+        cached = self.cache.lookup(channel, message) if cached_only else None
+        if cached_only and cached is None:
+            raise PlaybackError("This movie is not cached on the PC.", "cache_miss", True)
         if any(e["channel_id"] == channel and e["message_id"] == message for e in self.uploads.values()):
             raise PlaybackError("Wait for this movie's upload to finish.", "busy")
         renderer = ({"id": renderer_id, "name": "Samsung app"} if renderer_id.startswith("tizen:") else
@@ -336,7 +343,8 @@ class JobManager:
             "error": None,
             "error_code": None,
             "retryable": 0,
-            "cache_id": None,
+            "cache_id": cached["id"] if cached else None,
+            "_cached_only": cached_only,
             "created_at": now,
             "updated_at": now,
             "progress": None,
@@ -477,6 +485,9 @@ class JobManager:
                 self.cache.touch(entry["id"])
                 self._set(job, "downloading", "Already downloaded")
                 await self._play_ready(job, entry)
+            elif job.get("_cached_only"):
+                job["cache_id"] = None
+                raise PlaybackError("The cached movie is no longer available.", "cache_miss", True)
             else:
                 await self._download_and_play(job, channel_id, message_id)
         except asyncio.CancelledError:

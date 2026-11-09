@@ -625,6 +625,10 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ["api", "tvs"] and method == "GET":
                 refresh = parse_qs(query).get("refresh", [""])[0] == "1"
                 self.send_json(self.tv.call(manager.list_renderers(refresh)))
+            elif len(parts) == 4 and parts[:3] == ["api", "playback", "cache"] and method == "GET" and parts[3].isascii() and parts[3].isdigit():
+                movie = movie_detail(int(parts[3]))
+                cached = movie is not None and self.tv.call(manager.cached_movie(movie)) is not None
+                self.send_json({"cached": cached})
             elif parts == ["api", "playback"] and method == "POST":
                 movie_id = body.get("movie_id")
                 renderer_id = body.get("renderer_id")
@@ -638,7 +642,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 job, created = self.tv.call(
                     manager.create(
-                        movie, renderer_id, body.get("idempotency_key"), body.get("replace") is True, body.get("start_at")
+                        movie, renderer_id, body.get("idempotency_key"), body.get("replace") is True, body.get("start_at"),
+                        cached_only=body.get("cached_only") is True
                     )
                 )
                 self.send_json({"job": job}, 202 if created else 200)
