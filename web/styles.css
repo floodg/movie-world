@@ -254,6 +254,96 @@ button, a { font: inherit; }
   border-color: white;
 }
 
+.account {
+  position: relative;
+}
+
+.account-toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: white;
+  cursor: pointer;
+}
+
+.account-toggle:hover,
+.account-toggle:focus-visible {
+  border-color: white;
+}
+
+.account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--elevated);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.account-panel label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.account-panel input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #121212;
+  color: var(--text);
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.account-actions button {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: white;
+  cursor: pointer;
+}
+
+.account-actions button:hover,
+.account-actions button:focus-visible {
+  border-color: white;
+}
+
+#account-sign-in,
+#account-save-name {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.account-status,
+.account-name {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.account-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .brand {
   margin: 0;
   font-size: 1.6rem;
@@ -501,6 +591,10 @@ button, a { font: inherit; }
 }
 
 .scroller::-webkit-scrollbar { height: 8px; }
+.scroller { cursor: grab; user-select: none; }
+.scroller.is-dragging { scroll-snap-type: none; }
+.scroller.is-dragging,
+.scroller.is-dragging * { cursor: grabbing; }
 .scroller::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 99px; }
 
 .card {
@@ -845,3 +939,58 @@ body:has(.tv-bar:not([hidden])) { padding-bottom: 150px; }
 
 .upload-status { font-size: .9rem; color: var(--muted); overflow-wrap: anywhere; }
 .fav-action:disabled { opacity: .6; cursor: wait; }
+
+#history { padding: 20px; }
+#history .rail-status { padding: 8px 0; }
+#history .results-grid { justify-content: center; }
+#history-close { padding: 8px 14px; cursor: pointer; }
+
+.header-menu { position: relative; }
+#header-menu-toggle { display: none; }
+.year-filter-label { display: none; }
+@media (max-width: 900px) {
+  .top { flex-direction: column; align-items: stretch; }
+  .search-fields { width: 100%; min-width: 0; }
+  .search { min-width: 0; }
+  .top-actions { width: 100%; min-width: 0; justify-content: space-between; }
+  .tagline { min-width: 0; }
+  #header-menu-toggle { display: inline-flex; min-height: 44px; }
+  .header-tools { display: none; }
+  .header-menu.is-open .header-tools {
+    display: flex;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 40;
+    width: min(320px, calc(100vw - 32px));
+    max-height: 75vh;
+    overflow-y: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #1b1b1b;
+    box-shadow: 0 16px 40px rgba(0,0,0,.55);
+  }
+  .header-tools > .fav-link,
+  .header-tools .filter-btn,
+  .header-tools .account-toggle {
+    width: 100%;
+    min-height: 44px;
+    justify-content: flex-start;
+    border-radius: 8px;
+    text-align: left;
+  }
+  .year-filter-label { display: inline; }
+  .header-tools .year-panel,
+  .header-tools .account-panel {
+    position: static;
+    width: 100%;
+    max-height: none;
+    margin-top: 6px;
+    padding: 10px;
+    box-shadow: none;
+  }
+}

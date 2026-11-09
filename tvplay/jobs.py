@@ -4,6 +4,7 @@ Everything here runs on the single worker event loop owned by service.TvPlayback
 """
 import asyncio
 import json
+import math
 import os
 import re
 import time
@@ -56,6 +57,8 @@ class JobManager:
         self.reads = ActiveReads()
         self.cache = Cache(settings, self.reads)
         self.telegram = TelegramSource(settings)
+        self.personal = None
+        self.personal_sync = None
         self.registry = RendererRegistry(settings.get("renderer_urls") or [])
         self.media = MediaServer(self.resolve_media, port=int(settings.get("media_port") or 8766), reads=self.reads)
         self.jobs = {}
@@ -208,17 +211,93 @@ class JobManager:
         return self.snapshot(row)
 
     async def resume_point(self, movie_id):
-        return store.query_one("SELECT position, duration FROM resume_points WHERE movie_id = ?", (movie_id,))
+        return store.query_one(
+            "SELECT movie_id, position, duration, updated_at FROM resume_points WHERE movie_id = ?",
+            (movie_id,),
+        )
 
     async def resume_points(self):
         return store.query_all(
-            "SELECT movie_id, position, duration FROM resume_points "
+            "SELECT movie_id, position, duration, updated_at FROM resume_points "
             "WHERE duration > 0 ORDER BY updated_at DESC, movie_id"
         )
 
-    async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None):
+    async def mirror_resume_points(self, points):
+        """Write cloud- or browser-merged resume rows into the LAN store used by Play on TV."""
+        if not isinstance(points, list):
+            raise PlaybackError("Resume points must be a list.", "bad_request")
+        mirrored = []
+        for item in points:
+            if not isinstance(item, dict):
+                raise PlaybackError("Each resume point must be an object.", "bad_request")
+            movie_id = item.get("movie_id")
+            if not isinstance(movie_id, int) or isinstance(movie_id, bool) or movie_id <= 0:
+                raise PlaybackError("Choose a valid movie.", "bad_request")
+            clear = item.get("clear") is True or item.get("finished") is True
+            if clear:
+                store.execute("DELETE FROM resume_points WHERE movie_id = ?", (movie_id,))
+                mirrored.append({"movie_id": movie_id, "cleared": True})
+                continue
+            position = item.get("position")
+            duration = item.get("duration")
+            if not isinstance(position, (int, float)) or isinstance(position, bool) or position < 0:
+                raise PlaybackError("Invalid resume position.", "bad_request")
+            if duration is not None and (
+                not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration < 0
+            ):
+                raise PlaybackError("Invalid resume duration.", "bad_request")
+            updated_at = item.get("updated_at")
+            if updated_at is None:
+                updated_at = store.now()
+            elif not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool) or updated_at <= 0:
+                raise PlaybackError("Invalid resume timestamp.", "bad_request")
+            existing = store.query_one(
+                "SELECT updated_at FROM resume_points WHERE movie_id = ?", (movie_id,)
+            )
+            if existing and existing["updated_at"] > updated_at:
+                mirrored.append(
+                    {
+                        "movie_id": movie_id,
+                        "position": None,
+                        "duration": None,
+                        "updated_at": existing["updated_at"],
+                        "skipped": True,
+                    }
+                )
+                continue
+            position = int(position)
+            duration = None if duration is None else int(duration)
+            if duration and position >= min(duration - 90, duration * 0.95):
+                store.execute("DELETE FROM resume_points WHERE movie_id = ?", (movie_id,))
+                mirrored.append({"movie_id": movie_id, "cleared": True})
+                continue
+            if position < RESUME_MIN_SECONDS:
+                store.execute("DELETE FROM resume_points WHERE movie_id = ?", (movie_id,))
+                mirrored.append({"movie_id": movie_id, "cleared": True})
+                continue
+            store.execute(
+                """INSERT INTO resume_points (movie_id, position, duration, updated_at) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(movie_id) DO UPDATE SET position = excluded.position,
+                   duration = excluded.duration, updated_at = excluded.updated_at""",
+                (movie_id, position, duration, float(updated_at)),
+            )
+            mirrored.append(
+                {
+                    "movie_id": movie_id,
+                    "position": position,
+                    "duration": duration,
+                    "updated_at": float(updated_at),
+                }
+            )
+        return mirrored
+
+    async def cached_movie(self, movie):
+        channel, message = parse_message_link(movie.get("telegram_url"))
+        return self.cache.lookup(channel, message)
+
+    async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None, cached_only=False):
         if start_at is not None and (
-            not isinstance(start_at, (int, float)) or isinstance(start_at, bool) or start_at < 0
+            not isinstance(start_at, (int, float)) or isinstance(start_at, bool) or not math.isfinite(start_at) or start_at < 0
         ):
             raise PlaybackError("Invalid start position.", "bad_request")
         if idempotency_key is not None:
@@ -229,9 +308,13 @@ class JobManager:
                 return await self.get(existing["id"]), False
         parse_message_link(movie.get("telegram_url"))
         channel, message = parse_message_link(movie.get("telegram_url"))
+        cached = self.cache.lookup(channel, message) if cached_only else None
+        if cached_only and cached is None:
+            raise PlaybackError("This movie is not cached on the PC.", "cache_miss", True)
         if any(e["channel_id"] == channel and e["message_id"] == message for e in self.uploads.values()):
             raise PlaybackError("Wait for this movie's upload to finish.", "busy")
-        renderer = store.query_one("SELECT id, name FROM renderers WHERE id = ?", (renderer_id,))
+        renderer = ({"id": renderer_id, "name": "Samsung app"} if renderer_id.startswith("tizen:") else
+                    store.query_one("SELECT id, name FROM renderers WHERE id = ?", (renderer_id,)))
         if renderer is None:
             raise PlaybackError("Unknown TV. Refresh the TV list and choose again.", "bad_renderer")
         active = self._active()
@@ -260,7 +343,8 @@ class JobManager:
             "error": None,
             "error_code": None,
             "retryable": 0,
-            "cache_id": None,
+            "cache_id": cached["id"] if cached else None,
+            "_cached_only": cached_only,
             "created_at": now,
             "updated_at": now,
             "progress": None,
@@ -349,6 +433,7 @@ class JobManager:
             "can_seek": job.get("can_seek", False),
             "active": job["state"] not in TERMINAL,
             "updated_at": job["updated_at"],
+            "start_at": job.get("start_at"),
         }
 
     def _set(self, job, state, detail=None, persist=True):
@@ -371,6 +456,8 @@ class JobManager:
         self._set(job, "failed", None)
 
     async def _finish(self, job, final, detail):
+        if job["renderer_id"].startswith("tizen:"):
+            self._remember(job, force=True)
         job["_final"] = (final, detail)
         renderer = job.get("_renderer")
         if job["state"] in ON_TV and renderer is not None:
@@ -398,6 +485,9 @@ class JobManager:
                 self.cache.touch(entry["id"])
                 self._set(job, "downloading", "Already downloaded")
                 await self._play_ready(job, entry)
+            elif job.get("_cached_only"):
+                job["cache_id"] = None
+                raise PlaybackError("The cached movie is no longer available.", "cache_miss", True)
             else:
                 await self._download_and_play(job, channel_id, message_id)
         except asyncio.CancelledError:
@@ -421,8 +511,53 @@ class JobManager:
 
     async def _play_ready(self, job, entry):
         entry = await self._prepare(job, entry)
+        if job["renderer_id"].startswith("tizen:"):
+            host = self.settings.get("media_host") or local_ip_for(job["renderer_id"][6:])
+            job["media_url"] = self.media.url_for(host, entry["token"], "movie" + os.path.splitext(entry["play_name"])[1])
+            job["duration"] = entry["duration"]
+            job["_heartbeat"] = store.now()
+            self._set(job, "starting", "Ready for the Samsung app")
+            while job["state"] not in TERMINAL:
+                if store.now() - job["_heartbeat"] > 90:
+                    self._remember(job, force=True)
+                    self._set(job, "stopped", "Samsung app disconnected")
+                    break
+                await asyncio.sleep(3)
+            return
         renderer, url = await self._start_tv(job, entry)
         await self._monitor(job, renderer, url)
+
+    async def app_progress(self, job_id, body):
+        job = self.jobs.get(job_id)
+        if not job or not job["renderer_id"].startswith("tizen:"):
+            raise PlaybackError("Unknown app session.", "not_found")
+        state = body.get("state")
+        if state not in ("playing", "paused", "stopped", "ended", "failed"):
+            raise PlaybackError("Invalid player state.", "bad_request")
+        for key in ("position", "duration"):
+            value = body.get(key)
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                    raise PlaybackError("Invalid player time.", "bad_request")
+        if job["state"] in TERMINAL:
+            return self.snapshot(job)
+        if not job.get("media_url"):
+            raise PlaybackError("Video is not ready.", "not_ready")
+        job["_heartbeat"] = store.now()
+        job["position"] = body.get("position", job.get("position"))
+        job["duration"] = body.get("duration") or job.get("duration")
+        self._remember(job, force=state in TERMINAL)
+        if state == "ended":
+            store.execute("DELETE FROM resume_points WHERE movie_id = ?", (job["movie_id"],))
+        self._set(job, state, "Samsung app: " + state)
+        return self.snapshot(job)
+
+    async def app_status(self, job_id):
+        result = await self.get(job_id)
+        job = self.jobs.get(job_id)
+        if job and job["state"] not in TERMINAL:
+            result["media_url"] = job.get("media_url")
+        return result
 
     # Download
 
@@ -462,7 +597,9 @@ class JobManager:
         unlink(path)
         growing = GrowingFile(path, video.size)
         job["_download_path"] = path
-        if job.get("start_at"):
+        if job["renderer_id"].startswith("tizen:"):
+            self._skip_early(job, "Downloading the whole file for the Samsung app.")
+        elif job.get("start_at"):
             self._skip_early(job, "Downloading the whole file so Resume can jump to the saved time.")
         elif not video.size or video.size < STREAM_MIN_FILE:
             self._skip_early(job, None)
@@ -940,6 +1077,9 @@ class JobManager:
                 await self._stop_renderer_quiet(job)
                 raise
         elif job.get("start_at") == 0:
+            if getattr(self, "personal", None) is not None:
+                self.personal.progress(job["movie_id"], 0, job.get("duration"))
+                if getattr(self, "personal_sync", None): self.personal_sync.request(force=True)
             store.execute("DELETE FROM resume_points WHERE movie_id = ?", (job["movie_id"],))
         self.cache.touch(entry["id"])
         self._set(job, "playing", self._playing_detail(job))
@@ -1000,6 +1140,12 @@ class JobManager:
         if not force and now - job.get("_resume_saved", 0) < RESUME_SAVE_SECONDS:
             return
         job["_resume_saved"] = now
+        personal = getattr(self, "personal", None)
+        if personal is not None:
+            personal.progress(job["movie_id"], position, duration,
+                              finished=bool(duration and position >= min(duration - 90, duration * 0.95)))
+            sync = getattr(self, "personal_sync", None)
+            if sync: sync.request(force=force)
         if duration and position >= min(duration - 90, duration * 0.95):
             store.execute("DELETE FROM resume_points WHERE movie_id = ?", (job["movie_id"],))
         elif position >= RESUME_MIN_SECONDS:

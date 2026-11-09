@@ -22,7 +22,7 @@ if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContin
     New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 80 -Profile Private | Out-Null
 }
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`"" -WorkingDirectory $projectRoot
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`"" -WorkingDirectory $projectRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest

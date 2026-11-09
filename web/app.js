@@ -293,6 +293,7 @@ function appendMovieRail(section, bar, headingWrap, shown, emptyMessage) {
 
   const scroller = document.createElement("div");
   scroller.className = "scroller";
+  enableMouseDrag(scroller);
   for (const movie of shown) scroller.appendChild(movieCard(movie));
 
   prev.addEventListener("click", () => {
@@ -310,11 +311,138 @@ function appendMovieRail(section, bar, headingWrap, shown, emptyMessage) {
   requestAnimationFrame(syncNav);
 }
 
+function enableMouseDrag(scroller) {
+  let drag = null;
+  let suppressClick = false;
+  scroller.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    // Leave the native scrollbar available for dragging too.
+    if (event.clientY >= scroller.getBoundingClientRect().top + scroller.clientHeight) return;
+    suppressClick = false;
+    // Prevent native image dragging and button focus from interrupting the gesture.
+    event.preventDefault();
+    const target = event.target instanceof Element ? event.target : scroller;
+    target.setPointerCapture(event.pointerId);
+    drag = { id: event.pointerId, target, x: event.clientX, left: scroller.scrollLeft, active: false,
+      snap: scroller.style.scrollSnapType };
+  });
+  scroller.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const distance = event.clientX - drag.x;
+    if (!drag.active) {
+      if (Math.abs(distance) < 6) return;
+      drag.active = true;
+      suppressClick = true;
+      scroller.style.scrollSnapType = "none";
+      scroller.classList.add("is-dragging");
+    }
+    event.preventDefault();
+    scroller.scrollLeft = drag.left - distance;
+  });
+  const finish = (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const finished = drag;
+    drag = null;
+    scroller.classList.remove("is-dragging");
+    scroller.style.scrollSnapType = finished.snap;
+    if (finished.target.hasPointerCapture(event.pointerId)) finished.target.releasePointerCapture(event.pointerId);
+  };
+  scroller.addEventListener("pointerup", finish);
+  scroller.addEventListener("pointercancel", finish);
+  scroller.addEventListener("lostpointercapture", finish);
+  scroller.addEventListener("dragstart", (event) => event.preventDefault());
+  scroller.addEventListener("click", (event) => {
+    if (!suppressClick || event.detail === 0) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    suppressClick = false;
+  }, true);
+}
+
 let watchedProgress = new Map();
 let watchedProgressRequest = 0;
 let continueWatching = [];
+let historyRequest = 0;
+/** @type {Map<string, {movie_id:number, position:number, duration:number|null, finished:boolean, updated_at:number}>} */
+let watchStore = new Map();
 const continueWatchingEl = document.getElementById("continue-watching");
 const continueWatchingRow = document.getElementById("continue-watching-row");
+const historyEl = document.getElementById("history");
+const historyMoviesEl = document.getElementById("history-movies");
+const historyStatusEl = document.getElementById("history-status");
+enableMouseDrag(continueWatchingRow);
+const WATCH_LOCAL_KEY = "movie-world-watch-progress";
+
+function loadLocalWatchStore() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(WATCH_LOCAL_KEY) || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((item) => item && Number.isInteger(Number(item.movie_id)));
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalWatchStore() {
+  localStorage.setItem(WATCH_LOCAL_KEY, JSON.stringify([...watchStore.values()]));
+}
+
+function watchUpdatedAt(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const ms = Date.parse(value);
+    if (Number.isFinite(ms)) return ms / 1000;
+  }
+  return 0;
+}
+
+function isContinuePoint(point) {
+  const position = Number(point.position) || 0;
+  const duration = Number(point.duration) || 0;
+  if (point.finished) return false;
+  if (position < 15) return false;
+  if (duration > 0 && position >= duration - 30) return false;
+  return true;
+}
+
+function applyWatchStoreToUi() {
+  watchedProgress = new Map();
+  for (const point of watchStore.values()) {
+    if (!point.duration || point.duration <= 0 || point.finished) continue;
+    watchedProgress.set(String(point.movie_id), Math.min(100, 100 * point.position / point.duration));
+  }
+  for (const line of document.querySelectorAll(".watched-progress")) updateWatchedProgress(line);
+  for (const button of document.querySelectorAll(".watch-action")) {
+    const finished = Boolean(watchStore.get(button.dataset.movieId)?.finished);
+    button.textContent = finished ? "✓ Watched" : "Mark watched";
+    button.disabled = finished;
+  }
+}
+
+function watchedButton(movie) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "fav-action watch-action";
+  button.dataset.movieId = String(movie.id);
+  const finished = Boolean(watchStore.get(String(movie.id))?.finished);
+  button.textContent = finished ? "✓ Watched" : "Mark watched";
+  button.disabled = finished;
+  button.setAttribute("aria-label", `Mark ${movie.title} as watched`);
+  button.title = "Remove from Continue Watching and keep in watch history";
+  button.addEventListener("click", async () => {
+    const point = watchStore.get(String(movie.id));
+    upsertWatchPoint({
+      movie_id: movie.id,
+      position: point ? point.position : 0,
+      duration: point ? point.duration : null,
+      finished: true,
+      updated_at: Date.now() / 1000,
+    }, { mirror: true, pushCloud: true });
+    applyWatchStoreToUi();
+    await refreshWatchRails();
+  });
+  return button;
+}
 
 function renderContinueWatching() {
   const shown = continueWatching.filter(movieMatchesYear);
@@ -322,25 +450,147 @@ function renderContinueWatching() {
   continueWatchingEl.hidden = favouritesEl.hidden || !shown.length;
 }
 
+async function renderHistory() {
+  if (!historyEl.open) return;
+  const request = ++historyRequest;
+  const points = [...watchStore.values()].sort((a, b) => b.updated_at - a.updated_at);
+  const movies = await cardsForPoints(points);
+  if (request !== historyRequest || !historyEl.open) return;
+  const byId = new Map(movies.map((movie) => [String(movie.id), movie]));
+  const cards = points.flatMap((point) => {
+    const movie = byId.get(String(point.movie_id));
+    if (!movie) return [];
+    const card = movieCard(movie);
+    const note = document.createElement("p");
+    note.className = "rail-status";
+    const date = new Date(point.updated_at * 1000).toLocaleString();
+    note.textContent = `${point.finished ? "Watched" : "In progress"} · ${date}`;
+    card.appendChild(note);
+    return [card];
+  });
+  historyMoviesEl.replaceChildren(...cards);
+  historyStatusEl.textContent = points.length
+    ? (cards.length ? "Latest watched first. " : "History titles are unavailable from this catalogue. ")
+    : "Your watch history is empty. ";
+  historyStatusEl.textContent += window.MovieWorldCloud?.session()
+    ? "History is saved on the PC and syncs through Telegram."
+    : "Saved on this browser while PC sync is unavailable.";
+}
+
+document.getElementById("history-open").addEventListener("click", async () => {
+  historyEl.showModal();
+  historyStatusEl.textContent = "Loading history…";
+  await refreshWatchedProgress();
+  if (window.MovieWorldCloud?.session()) {
+    historyStatusEl.textContent = "Syncing history…";
+    try {
+      await window.MovieWorldCloud.syncWatchProgress();
+      await renderHistory();
+    } catch {
+      await renderHistory();
+      historyStatusEl.textContent += " Could not sync; showing the saved copy.";
+    }
+  }
+});
+document.getElementById("history-close").addEventListener("click", () => historyEl.close());
+
+async function cardsForPoints(points, movies) {
+  if (movies && movies.length) return movies;
+  const results = await Promise.allSettled(
+    points.map(({ movie_id }) => fetchJson(`/api/movies/${movie_id}`))
+  );
+  return results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+}
+
+async function refreshWatchRails() {
+  const points = [...watchStore.values()].sort((a, b) => b.updated_at - a.updated_at);
+  const continuingPoints = points.filter(isContinuePoint).slice(0, 20);
+  const continueCards = await cardsForPoints(continuingPoints);
+  const continueIds = new Set(continuingPoints.map((point) => String(point.movie_id)));
+  continueWatching = continueCards.filter((movie) => continueIds.has(String(movie.id)));
+  applyWatchStoreToUi();
+  renderContinueWatching();
+  await renderHistory();
+}
+
+function upsertWatchPoint(point, { mirror = false, pushCloud = false } = {}) {
+  const movieId = Number(point.movie_id);
+  if (!Number.isInteger(movieId) || movieId <= 0) return;
+  const next = {
+    movie_id: movieId,
+    position: Math.max(0, Math.floor(Number(point.position) || 0)),
+    duration: point.duration == null ? null : Math.max(0, Math.floor(Number(point.duration) || 0)),
+    finished: Boolean(point.finished),
+    updated_at: watchUpdatedAt(point.updated_at) || Date.now() / 1000,
+  };
+  const existing = watchStore.get(String(movieId));
+  if (existing && existing.updated_at > next.updated_at) return existing;
+  if (next.finished || (next.duration > 0 && next.position >= Math.min(next.duration - 90, next.duration * 0.95))) {
+    next.finished = true;
+  }
+  watchStore.set(String(movieId), next);
+  saveLocalWatchStore();
+  if (pushCloud && window.MovieWorldCloud) {
+    window.MovieWorldCloud.pushWatchProgress({
+      movie_id: next.movie_id,
+      position_seconds: next.position,
+      duration_seconds: next.duration,
+      finished: next.finished,
+      updated_at: new Date(next.updated_at * 1000).toISOString(),
+    });
+  }
+  if (mirror) mirrorResumeToLan([next]);
+  return next;
+}
+
+async function mirrorResumeToLan(points) {
+  try {
+    const response = await fetch("/api/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        points: points.map((point) => ({
+          movie_id: point.movie_id,
+          position: point.position,
+          duration: point.duration,
+          updated_at: point.updated_at,
+          finished: point.finished,
+          clear: point.finished,
+        })),
+      }),
+    });
+    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+  } catch {
+    // TV playback may be disabled on this server.
+  }
+}
+
 async function refreshWatchedProgress() {
   const request = ++watchedProgressRequest;
+  for (const item of loadLocalWatchStore()) upsertWatchPoint(item);
   try {
     const { points, movies } = await fetchJson("/api/resume");
     if (request !== watchedProgressRequest) return;
-    watchedProgress = new Map(points.map(({ movie_id, position, duration }) =>
-      [String(movie_id), Math.min(100, 100 * position / duration)]));
-    for (const line of document.querySelectorAll(".watched-progress")) updateWatchedProgress(line);
-    // Static files can update while the running server still serves the older response.
-    const cards = movies ?? (await Promise.allSettled(points
-      .filter(({ position, duration }) => position > 0 && position < duration)
-      .map(({ movie_id }) => fetchJson(`/api/movies/${movie_id}`))))
-      .flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-    if (request !== watchedProgressRequest) return;
-    continueWatching = cards;
-    renderContinueWatching();
+    const winners = [];
+    for (const point of points) {
+      const next = upsertWatchPoint({
+        movie_id: point.movie_id,
+        position: point.position,
+        duration: point.duration,
+        finished: false,
+        updated_at: point.updated_at ?? Date.now() / 1000,
+      }, { pushCloud: true });
+      if (next) winners.push(next);
+    }
+    if (movies && movies.length) {
+      const ids = new Set(points.map((point) => String(point.movie_id)));
+      continueWatching = movies.filter((movie) => ids.has(String(movie.id)));
+    }
   } catch {
     // The catalogue can run without TV playback enabled.
   }
+  if (request !== watchedProgressRequest) return;
+  await refreshWatchRails();
 }
 
 function updateWatchedProgress(line) {
@@ -349,7 +599,121 @@ function updateWatchedProgress(line) {
   line.hidden = percent <= 0;
 }
 
-window.addEventListener("movie-world-progress", refreshWatchedProgress);
+window.addEventListener("movie-world-progress", (event) => {
+  const detail = event.detail;
+  if (detail && detail.movie_id != null) {
+    upsertWatchPoint({
+      movie_id: detail.movie_id,
+      position: detail.position,
+      duration: detail.duration,
+      finished: detail.finished,
+      updated_at: Date.now() / 1000,
+    }, { mirror: true, pushCloud: true });
+    refreshWatchRails();
+    return;
+  }
+  refreshWatchedProgress();
+});
+
+window.MovieWorldSync = {
+  async setAccountScope(scope) {
+    const key = "movie-world-pc-account";
+    const previous = localStorage.getItem(key);
+    if (previous && previous !== scope && previous !== "local") {
+      localStorage.setItem("movie-world-cache-" + previous, JSON.stringify({
+        favourites: loadFavouriteStore(), progress: loadLocalWatchStore(),
+      }));
+      let cache = {};
+      try { cache = JSON.parse(localStorage.getItem("movie-world-cache-" + scope) || "{}"); } catch (_) {}
+      saveFavouriteStore(cache.favourites || []);
+      favourites = loadFavourites();
+      watchStore = new Map();
+      localStorage.setItem(WATCH_LOCAL_KEY, JSON.stringify(cache.progress || []));
+      for (const point of cache.progress || []) upsertWatchPoint(point);
+      renderFavourites(); syncFavButtons(); await refreshWatchRails();
+    }
+    localStorage.setItem(key, scope);
+  },
+  exportFavouritesForCloud() {
+    return loadFavouriteStore().map((item) => ({
+      movie_id: item.id,
+      removed_at: item.removed_at,
+      updated_at: item.updated_at,
+      title: item.title,
+      year: item.year,
+      rating: item.rating,
+      poster_url: item.poster_url,
+      media_type: item.media_type,
+    }));
+  },
+  async mergeFavouritesFromCloud(rows) {
+    const store = loadFavouriteStore();
+    const byId = new Map(store.map((item) => [item.id, item]));
+    for (const row of rows || []) {
+      const id = Number(row.movie_id);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      const incomingAt = watchUpdatedAt(row.updated_at);
+      const existing = byId.get(id);
+      if (existing && watchUpdatedAt(existing.updated_at) > incomingAt) continue;
+      byId.set(id, {
+        id,
+        title: (existing && existing.title) || `Movie ${id}`,
+        year: existing && existing.year != null ? existing.year : null,
+        rating: existing && existing.rating != null ? existing.rating : null,
+        poster_url: existing && existing.poster_url != null ? existing.poster_url : null,
+        media_type: existing && existing.media_type != null ? existing.media_type : null,
+        updated_at: typeof row.updated_at === "string" ? row.updated_at : new Date(incomingAt * 1000).toISOString(),
+        removed_at: row.removed_at
+          ? (typeof row.removed_at === "string" ? row.removed_at : new Date(watchUpdatedAt(row.removed_at) * 1000).toISOString())
+          : null,
+      });
+    }
+    const next = [...byId.values()];
+    saveFavouriteStore(next);
+    favourites = next.filter((item) => !item.removed_at);
+    // Fill titles for cloud-only ids from the catalogue.
+    const missing = favourites.filter((item) => item.title.startsWith("Movie "));
+    if (missing.length) {
+      const results = await Promise.allSettled(missing.map((item) => fetchJson(`/api/movies/${item.id}`)));
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        const movie = result.value;
+        const index = favourites.findIndex((item) => item.id === movie.id);
+        if (index >= 0) {
+          const saved = favourites[index];
+          favourites[index] = { ...saved, ...favouriteSnapshot(movie), updated_at: saved.updated_at, removed_at: saved.removed_at };
+        }
+      }
+      saveFavourites();
+    }
+    renderFavourites();
+    syncFavButtons();
+  },
+  exportWatchForCloud() {
+    return [...watchStore.values()].map((point) => ({
+      movie_id: point.movie_id,
+      position_seconds: point.position,
+      duration_seconds: point.duration,
+      finished: point.finished,
+      updated_at: new Date(point.updated_at * 1000).toISOString(),
+    }));
+  },
+  async mergeWatchFromCloud(rows) {
+    const mirrored = [];
+    for (const row of rows || []) {
+      const next = upsertWatchPoint({
+        movie_id: row.movie_id,
+        position: row.position_seconds,
+        duration: row.duration_seconds,
+        finished: row.finished,
+        updated_at: row.updated_at,
+      });
+      if (next) mirrored.push(next);
+    }
+    // The PC personal-data store already mirrors winning records into playback resume storage.
+    await refreshWatchRails();
+  },
+};
 
 function movieCard(movie) {
   const card = document.createElement("article");
@@ -402,7 +766,7 @@ function movieCard(movie) {
   meta.className = "card-meta";
   meta.textContent = movie.year ? String(movie.year) : "";
   button.append(wrap, title, meta);
-  card.append(button, favToggle(movie));
+  card.append(button, favToggle(movie), watchedButton(movie));
   return card;
 }
 
@@ -425,7 +789,7 @@ function heartIcon() {
   return svg;
 }
 
-function loadFavourites() {
+function loadFavouriteStore() {
   try {
     const raw = JSON.parse(localStorage.getItem(FAVOURITES_KEY) || "[]");
     if (!Array.isArray(raw)) return [];
@@ -443,23 +807,56 @@ function loadFavourites() {
   }
 }
 
+function loadFavourites() {
+  return loadFavouriteStore().filter((item) => !item.removed_at);
+}
+
 function normalizeFavourite(item) {
   if (!item || typeof item !== "object") return null;
-  const id = Number(item.id);
+  const id = Number(item.id ?? item.movie_id);
   if (!Number.isInteger(id) || id <= 0) return null;
-  if (typeof item.title !== "string" || !item.title) return null;
+  const title = typeof item.title === "string" ? item.title : `Movie ${id}`;
+  const updatedAt = typeof item.updated_at === "string"
+    ? item.updated_at
+    : (typeof item.updated_at === "number"
+      ? new Date(item.updated_at * 1000).toISOString()
+      : new Date(0).toISOString());
+  const removedAt = item.removed_at
+    ? (typeof item.removed_at === "string" ? item.removed_at : new Date(item.removed_at * 1000).toISOString())
+    : null;
   return {
     id,
-    title: item.title,
+    title,
     year: Number.isInteger(item.year) ? item.year : null,
     rating: typeof item.rating === "number" ? item.rating : null,
     poster_url: typeof item.poster_url === "string" ? item.poster_url : null,
     media_type: typeof item.media_type === "string" ? item.media_type : null,
+    updated_at: updatedAt,
+    removed_at: removedAt,
   };
 }
 
+function saveFavouriteStore(store) {
+  localStorage.setItem(FAVOURITES_KEY, JSON.stringify(store));
+}
+
 function saveFavourites() {
-  localStorage.setItem(FAVOURITES_KEY, JSON.stringify(favourites));
+  const store = loadFavouriteStore();
+  const activeIds = new Set(favourites.map((movie) => movie.id));
+  const next = [];
+  const seen = new Set();
+  for (const movie of favourites) {
+    next.push({ ...movie, removed_at: null, updated_at: movie.updated_at || new Date().toISOString() });
+    seen.add(movie.id);
+  }
+  for (const item of store) {
+    if (seen.has(item.id)) continue;
+    if (!activeIds.has(item.id) && item.removed_at) {
+      next.push(item);
+      seen.add(item.id);
+    }
+  }
+  saveFavouriteStore(next);
 }
 
 function isFavourite(id) {
@@ -474,16 +871,31 @@ function favouriteSnapshot(movie) {
     rating: movie.rating ?? null,
     poster_url: movie.poster_url ?? null,
     media_type: movie.media_type ?? null,
+    updated_at: new Date().toISOString(),
+    removed_at: null,
   };
 }
 
 function toggleFavourite(movie) {
+  const now = new Date().toISOString();
+  const store = loadFavouriteStore();
   if (isFavourite(movie.id)) {
     favourites = favourites.filter((item) => item.id !== movie.id);
+    const existing = store.find((item) => item.id === movie.id);
+    const tombstone = {
+      ...(existing || favouriteSnapshot(movie)),
+      id: movie.id,
+      updated_at: now,
+      removed_at: now,
+    };
+    saveFavouriteStore([tombstone, ...store.filter((item) => item.id !== movie.id)]);
+    if (window.MovieWorldCloud) window.MovieWorldCloud.pushFavourite(movie.id, now, now);
   } else {
-    favourites = [favouriteSnapshot(movie), ...favourites];
+    const snapshot = favouriteSnapshot(movie);
+    favourites = [snapshot, ...favourites];
+    saveFavouriteStore([snapshot, ...store.filter((item) => item.id !== movie.id)]);
+    if (window.MovieWorldCloud) window.MovieWorldCloud.pushFavourite(movie.id, null, snapshot.updated_at);
   }
-  saveFavourites();
   renderFavourites();
   syncFavButtons();
 }
@@ -665,7 +1077,7 @@ function renderDetail(movie) {
   fav.append(heartIcon(), favLabel);
   applyFavState(fav);
   fav.addEventListener("click", () => toggleFavourite(movie));
-  actions.appendChild(fav);
+  actions.append(fav, watchedButton(movie));
   if (typeof movie.telegram_url === "string" && movie.telegram_url.startsWith("https://")) {
     const link = document.createElement("a");
     link.className = "telegram";
@@ -1188,6 +1600,7 @@ document.getElementById("favourites-jump").addEventListener("click", () => {
 syncYearFilterUi();
 renderFavourites();
 refreshWatchedProgress();
+if (window.MovieWorldCloud && window.MovieWorldCloud.start) window.MovieWorldCloud.start();
 
 fetchJson("/api/genres")
   .then((rows) => {
@@ -1200,3 +1613,33 @@ fetchJson("/api/genres")
     message.textContent = "Could not load genres.";
     genresEl.replaceWith(message);
   });
+
+const headerMenu = document.getElementById("header-menu");
+const headerMenuToggle = document.getElementById("header-menu-toggle");
+function setHeaderMenu(open, restoreFocus = false) {
+  headerMenu.classList.toggle("is-open", open);
+  headerMenuToggle.setAttribute("aria-expanded", String(open));
+  if (!open) {
+    setYearPanel(false);
+    const accountPanel = document.getElementById("account-panel");
+    if (accountPanel) accountPanel.hidden = true;
+    if (restoreFocus) headerMenuToggle.focus();
+  }
+}
+headerMenuToggle.addEventListener("click", () => {
+  setHeaderMenu(!headerMenu.classList.contains("is-open"));
+});
+document.addEventListener("click", (event) => {
+  if (!headerMenu.contains(event.target)) setHeaderMenu(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && headerMenu.classList.contains("is-open")) {
+    setHeaderMenu(false, true);
+  }
+});
+headerMenu.addEventListener("focusout", (event) => {
+  if (event.relatedTarget && !headerMenu.contains(event.relatedTarget)) setHeaderMenu(false);
+});
+for (const id of ["favourites-jump", "history-open"]) {
+  document.getElementById(id).addEventListener("click", () => setHeaderMenu(false));
+}

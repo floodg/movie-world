@@ -7,7 +7,8 @@ A local movie catalogue browser built with Python, SQLite, and vanilla HTML, CSS
 - Browse genres with movies sorted by IMDb rating.
 - Search the catalogue by title or actor.
 - View movie details, posters, and backdrops.
-- Save favourites in your browser's local storage.
+- Save favourites in PC SQLite, keep a browser cache for offline use, and sync with Android through Telegram Saved Messages.
+- Resume TV playback and recently watched titles sync through the same Telegram account.
 - Enrich movie metadata and cast information using TMDB.
 
 Titles tagged with the Adult genre are excluded from the browser.
@@ -24,7 +25,20 @@ python server.py
 
 Open http://127.0.0.1:8765 in your browser. Stop the server with Ctrl+C.
 
-The server reads the included `sql-lite/movie-world.sqlite` catalogue in read-only mode and listens on the local computer only. Poster and backdrop images require internet access. Favourites are stored per browser and are not written to the database.
+The server reads the included `sql-lite/movie-world.sqlite` catalogue in read-only mode. Personal data is stored separately in `.local/jobs.sqlite`, alongside existing playback state. Browser favourites and history are adopted once per account, and existing PC resume points are preserved. The browser retains an offline cache and queues edits until the PC is reachable.
+
+### Personal data sync with Android
+
+Install `requirements.txt` and configure the PC Telegram login using the existing playback setup below. The server syncs automatically through that account's Saved Messages, including without `--tv-playback`. With playback enabled, sync shares the existing Telegram client and worker rather than opening another session. Without the optional packages or a working Telegram login, local SQLite and browser caches remain usable.
+
+Open **PC sync** in the browser header to see status or request **Sync now**. There is no Supabase login, CDN SDK, or cloud-config requirement. The Android app must use the same Telegram account. The PC and Android exchange the same version-1 JSON format; records merge individually by timestamp and device ID, including removals, completion and deliberate playback resets. Account changes isolate local records and browser caches.
+
+PC playback polls the TV about every three seconds and saves locally at most every 15 seconds, with existing pause/stop flushes. Server-owned tracking continues with browser tabs closed. Telegram uploads are limited to about once per minute; pause/stop and manual sync can flush sooner. The browser refreshes from PC storage every 15 seconds and when it returns to the foreground. Network and Telegram rate-limit failures keep local data and retry automatically while the PC server runs.
+
+Each device keeps its latest two snapshots. Older copies are deleted only if retained backups cover their records; filenames with hyphens or Telegram-normalized underscores are supported. Cleanup is restricted to this PC's snapshots. Credentials, session files, movie downloads, catalogue and TV settings are excluded from snapshots. Saved Messages uses ordinary Telegram cloud storage, without a separate encryption password. Keep this server on the trusted LAN; personal-data routes reject cross-origin requests and do not expose CORS access.
+
+The legacy `supabase/` SQL and documentation remain as historical source data. The server does not query or delete that project, and this change does not perform the previously blocked Supabase export. Existing Telegram snapshots and local/browser data are sufficient for normal PC/Android sync.
+
 
 ## View on a TV over the local network
 
@@ -47,6 +61,10 @@ To start it automatically each time you sign in to Windows:
 ```
 
 ### Samsung RU7100 TV interface
+
+For the privately installed Tizen app with in-app playback, see
+[Samsung app build and installation](docs/tizen-app.md). Signing and physical-TV
+acceptance are required before treating that app as verified on the RU7100.
 
 For the Samsung **UA65RU7100WXXY** (2019), open **http://192.168.0.20/tv**
 on the TV. Both `/tv` and `/tv/` work.
@@ -207,6 +225,8 @@ python server.py --host 0.0.0.0 --port 80 --tv-playback
 The console prints `Play on TV enabled. The TV fetches video on port 8766.` On the phone, open `http://<this-pc-ip>` (no port), open a movie, choose the TV, and press **Play on TV**. If the list says no TVs were found, turn the TV on and press **Search again**. The saved `renderer_urls` entry is used when a fresh search finds nothing.
 
 Settings in `.local/tvplay.json`: `cache_quota_gb` (default 50), `disk_headroom_gb`, `max_file_gb`, `media_host` (the PC's LAN IP, normally auto-detected), `renderer_urls` (TV description URLs if discovery fails, for example `http://<tv-ip>:9197/dmr`), and `media_port`. Downloads are cached in `.local/cache`. The least recently used inactive files are removed when the quota is reached.
+
+The Android app can optionally prefer this PC's completed cache. In **TV settings → Home PC**, enter the server's LAN address (for example `http://192.168.1.10`) and choose **Check and save PC**. Before a phone download, the app checks `GET /api/playback/cache/{movie_id}` over Wi-Fi. A cache hit starts a normal PC-controlled TV session with `cached_only: true`; a missing, incomplete, or unavailable cache falls back to phone playback. The cache-only request never downloads a missing movie on the PC. The app uses the newer phone/PC resume point, and Start over forces zero. Pause, resume, seek and stop go through the PC during a PC session. Explicitly selected phone video files keep using the phone. Reserve the PC's LAN address in the router so the saved address stays valid.
 
 A compatible title starts on the TV once the first portion has downloaded. The rest keeps
 downloading, and the finished file stays in the cache. Stopping the TV while that download

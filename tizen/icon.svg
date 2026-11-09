@@ -1,0 +1,8 @@
+<!-- Same paths, viewport and colours as Android ic_launcher_foreground.xml,
+     flattened over the adaptive icon's @color/night background. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="117" height="117" viewBox="0 0 108 108">
+  <path fill="#0A0A0F" d="M0 0h108v108H0z"/>
+  <path fill="#F5A524" d="M42,32 h24 a12,12 0 0 1 12,12 v20 a12,12 0 0 1 -12,12 h-24 a12,12 0 0 1 -12,-12 v-20 a12,12 0 0 1 12,-12 z"/>
+  <path fill="#0A0A0F" d="M48,44 L66,54 L48,64 Z"/>
+  <path fill="#0A0A0F" fill-opacity="0.35" d="M36,70 h36 v3 h-36 z"/>
+</svg>
