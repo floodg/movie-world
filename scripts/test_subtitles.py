@@ -30,6 +30,8 @@ class SubtitleTests(unittest.IsolatedAsyncioTestCase):
             entry = dict(id=1, source_name='source.mkv', source_size=100,
                          play_name='source.tv.mp4', mime='video/mp4', duration=1,
                          probe='{"action":"audio"}')
+            old_file = Path(folder) / entry['play_name']
+            old_file.write_bytes(b'old conversion')
             async def converted(settings, source, destination, plan, duration, progress):
                 destination.write_bytes(b'converted')
             with patch.object(formats, 'probe', AsyncMock(return_value=media(['subrip']))), patch.object(
@@ -38,9 +40,30 @@ class SubtitleTests(unittest.IsolatedAsyncioTestCase):
                 convert.assert_awaited_once()
                 self.assertEqual(manager.cache.set_playable.call_args.args[1], 'source.tv.mkv')
                 self.assertIn('"subtitle_version": 1', manager.cache.set_playable.call_args.args[3])
+                self.assertFalse(old_file.exists())
                 entry['probe'] = '{"subtitle_version":1}'
                 self.assertIs(await manager._prepare({}, entry), entry)
                 convert.assert_awaited_once()
+
+    async def test_existing_conversion_survives_missing_probe_or_failed_rebuild(self):
+        with tempfile.TemporaryDirectory() as folder:
+            manager = JobManager.__new__(JobManager)
+            manager.settings = {}; manager.jobs = {}; manager._set = Mock()
+            manager.cache = Mock()
+            manager.cache.path.side_effect = lambda name: Path(folder) / name
+            entry = dict(id=1, source_name='source.mkv', source_size=100,
+                         play_name='source.tv.mp4', mime='video/mp4', duration=1, probe='{}')
+            old_file = Path(folder) / entry['play_name']
+            old_file.write_bytes(b'old conversion')
+            with patch.object(formats, 'probe', AsyncMock(return_value=None)):
+                self.assertIs(await manager._prepare({}, entry), entry)
+                manager.cache.set_playable.assert_not_called()
+            with patch.object(formats, 'probe', AsyncMock(return_value=media(['subrip']))), patch.object(
+                    formats, 'convert', AsyncMock(side_effect=RuntimeError('failed'))):
+                with self.assertRaises(RuntimeError):
+                    await manager._prepare({}, entry)
+            self.assertEqual(old_file.read_bytes(), b'old conversion')
+            manager.cache.set_playable.assert_not_called()
 
     def test_direct_and_no_subtitle_paths(self):
         self.assertEqual(formats.plan_for(media(['subrip'], 'aac'), '').action, 'direct')
