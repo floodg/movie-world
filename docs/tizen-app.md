@@ -61,6 +61,13 @@ local favourites. Browser favourites have separate storage.
 
 - Arrows and Enter browse. Select **Play** or **Resume** on Home or movie details.
 - Enter or Play/Pause toggles playback; dedicated media keys also work.
+- During playback press **Down** (or the Subtitle key) for the subtitle menu.
+  Choose Off or an embedded track. The app remembers on/off and prefers English
+  when starting the next movie with subtitles enabled. Timing buttons adjust by
+  half a second, up to 30 seconds either way, where the TV supports it.
+  Back closes this menu without stopping the movie. Movies without subtitle
+  tracks show an explicit empty state. Playback starts with subtitles off until
+  enabled once. Track support and timing require physical-TV acceptance.
 - Left/right or Rewind/Fast Forward seeks 30 seconds. Back stops playback or
   cancels preparation and returns to details. Back at the catalogue root exits.
 - Resume is automatic when the PC has a saved position. This first version waits
@@ -76,6 +83,22 @@ then a real downloaded film. Verify picture, sound, buffering, seeking, pause,
 resume, Back, standby, PC loss, wrong token and restart recovery. Test a second
 DLNA playback afterwards. Emulator or mocked tests cannot establish actual TV
 codec support, app-origin networking, certificate acceptance or standby behavior.
+
+## Subtitle preparation
+
+Direct playback retains the original embedded subtitle tracks. When the PC must
+convert video or audio, it now preserves supported subtitle streams in Matroska
+(SRT, ASS/SSA, WebVTT, PGS and VobSub), converting MP4 timed text to SRT as needed.
+Languages and track dispositions are carried over by FFmpeg. Other subtitle
+codecs are omitted from conversions; preserving a track does not guarantee the
+TV can decode it. No video encoding is added solely to display subtitles.
+Previously converted cached movies are rebuilt once from their retained source
+on their next playback. The PC server must be restarted to load this change.
+
+DLNA casting receives these embedded tracks too, but subtitle selection remains
+in the TV's own playback controls and needs hardware testing. The web catalogue
+cannot draw subtitles over a separately cast video. Online subtitle search,
+external SRT upload and automatic transcription are not implemented yet.
 
 ## Backend interface
 

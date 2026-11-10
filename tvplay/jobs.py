@@ -1009,15 +1009,33 @@ class JobManager:
 
     async def _prepare(self, job, entry):
         if entry["play_name"]:
-            return entry
+            # Old converted cache files dropped all subtitles. Rebuild once from
+            # the original download; direct files already retain their tracks.
+            try:
+                previous = json.loads(entry.get("probe") or "{}")
+            except (ValueError, TypeError):
+                previous = {}
+            if entry["play_name"] == entry["source_name"] or (isinstance(previous, dict) and previous.get("subtitle_version") == 1):
+                return entry
         self._set(job, "checking", "Checking the video format")
         source = self.cache.path(entry["source_name"])
         data = await formats.probe(self.settings, source)
+        if data is None and entry["play_name"]:
+            # Keep a known playable conversion when format tools are unavailable.
+            return entry
         duration = formats.duration_of(data) if data else entry["duration"]
         plan = formats.plan_for(data, entry["mime"])
-        summary = json.dumps({"action": plan.action, "reasons": plan.reasons})
+        summary = json.dumps({"action": plan.action, "reasons": plan.reasons, "subtitle_version": 1})
+
+        def save_prepared(name):
+            prepared = self.cache.set_playable(entry["id"], name, plan.mime, summary, duration)
+            old_name = entry.get("play_name")
+            if old_name and old_name not in (entry["source_name"], name):
+                unlink(self.cache.path(old_name))
+            return prepared
+
         if plan.action == "direct":
-            return self.cache.set_playable(entry["id"], entry["source_name"], plan.mime, summary, duration)
+            return save_prepared(entry["source_name"])
         out_name = formats.output_name(source, plan)
         out_part = self.cache.path(out_name + ".part")
         self.cache.ensure_space(entry["source_size"], self._protected_ids() | {entry["id"]})
@@ -1034,7 +1052,7 @@ class JobManager:
             raise
         os.replace(out_part, self.cache.path(out_name))
         job["progress"] = None
-        return self.cache.set_playable(entry["id"], out_name, plan.mime, summary, duration)
+        return save_prepared(out_name)
 
     # TV
 

@@ -29,6 +29,7 @@ class Plan:
     reasons: list = field(default_factory=list)
     convert_video: bool = False
     convert_audio: bool = False
+    subtitles: list = field(default_factory=list)
 
 
 def tool(settings, name):
@@ -330,9 +331,14 @@ def plan_for(data, source_mime):
     video_codec = "h264" if convert_video else video.get("codec_name")
     audio_codecs = {"ac3" if convert_audio else s.get("codec_name") for s in audio}
     mp4 = video_codec in MP4_VIDEO and audio_codecs <= MP4_AUDIO
-    container, mime = ("mp4", "video/mp4") if mp4 else ("mkv", "video/x-matroska")
+    # Matroska preserves subtitle tracks without burning them into the picture.
+    # mov_text cannot be copied to Matroska, so convert that text track to SRT.
+    subtitles = [s for s in streams if s.get("codec_type") == "subtitle" and
+                 s.get("codec_name") in {"subrip", "ass", "ssa", "webvtt", "mov_text", "text",
+                                        "hdmv_pgs_subtitle", "dvd_subtitle"}]
+    container, mime = ("mp4", "video/mp4") if mp4 and not subtitles else ("mkv", "video/x-matroska")
     action = "transcode" if convert_video else "audio" if convert_audio else "remux"
-    return Plan(action, container, mime, reasons, convert_video, convert_audio)
+    return Plan(action, container, mime, reasons, convert_video, convert_audio, subtitles)
 
 
 async def convert(settings, source, destination, plan, duration, progress):
@@ -342,7 +348,12 @@ async def convert(settings, source, destination, plan, duration, progress):
         raise PlaybackError(
             "This video needs converting for the TV, but FFmpeg is not installed on the PC.", "unsupported"
         )
-    args = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?", "-sn"]
+    args = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?"]
+    for index, stream in enumerate(plan.subtitles):
+        args += ["-map", f"0:{stream['index']}", f"-c:s:{index}",
+                 "srt" if stream.get("codec_name") in {"mov_text", "text"} else "copy"]
+    if not plan.subtitles:
+        args += ["-sn"]
     if plan.convert_video:
         args += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
                  "-profile:v", "high", "-level", "4.1"]
