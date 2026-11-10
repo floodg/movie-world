@@ -46,6 +46,61 @@ test.beforeEach(async ({page}) => {
   await page.evaluate(() => document.fonts.ready);
 });
 
+async function startSubtitleMovie(page, tracks) {
+  await page.addInitScript(tracks => {
+    let state = 'NONE';
+    window.__subtitleCalls = [];
+    window.webapis = {avplay:{
+      open(){state='IDLE';}, setDisplayRect(){}, setListener(){},
+      prepareAsync(done){state='READY';done();}, play(){state='PLAYING';},
+      pause(){state='PAUSED';}, close(){state='NONE';}, getState(){return state;},
+      getDuration(){return 100000;}, getCurrentTime(){return 1000;},
+      getTotalTrackInfo(){return tracks;},
+      setSelectTrack(type,index){window.__subtitleCalls.push(['track',type,index]);},
+      setSilentSubtitle(value){window.__subtitleCalls.push(['silent',value]);},
+      setSubtitlePosition(value){window.__subtitleCalls.push(['delay',value]);}
+    }};
+  }, tracks);
+  await page.route('**/api/tizen/*/status', route => route.fulfill({json:{job:{
+    id:'b'.repeat(32), movie_id:1, title:movie.title, active:true, media_url:'http://pc/movie.mkv'
+  }},headers:{'Access-Control-Allow-Origin':'*'}}));
+  await page.route('**/api/tizen/*/progress', route => route.fulfill({json:{job:{active:true}},headers:{'Access-Control-Allow-Origin':'*'}}));
+  await page.reload();
+  await expect(page.locator('.hero h1')).toHaveText(movie.title);
+  await page.evaluate(() => window.MovieWorldTv.play({id:1,title:'Test'}));
+  await expect(page.locator('body')).toHaveClass(/mw-playing/);
+}
+
+test('subtitle menu selects actual track IDs, adjusts timing and Back keeps playing', async ({page}) => {
+  await startSubtitleMovie(page,[{type:'AUDIO',index:0},{type:'TEXT',index:4,extra_info:'{"track_lang":"eng"}'}]);
+  await page.keyboard.press('ArrowDown');
+  const panel = page.locator('.subtitle-panel').last();
+  await expect(panel).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => window.__subtitleCalls)).toContainEqual(['track','TEXT',4]);
+  expect(await page.evaluate(() => window.__subtitleCalls)).toContainEqual(['silent',false]);
+  expect(await page.evaluate(() => window.__subtitleCalls)).toContainEqual(['delay',500]);
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(page.locator('body')).toHaveClass(/mw-playing/);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => window.__subtitleCalls)).toContainEqual(['silent',true]);
+});
+
+test('subtitle menu handles movies with no subtitles', async ({page}) => {
+  await startSubtitleMovie(page,[]);
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('.subtitle-panel').last()).toContainText('No embedded subtitles available');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/mw-playing/);
+});
+
 test('Kotlin home theme, fonts, tabs and launcher icon',async ({page}) => {
   await expect(page.locator('.wordmark')).toHaveText('MOVIEWORLD');
   await expect(page.locator('.tabs button')).toHaveText(['Home','Search','My List']);

@@ -31,6 +31,66 @@
   status.appendChild(statusTitle); status.appendChild(statusText); status.appendChild(statusStop);
   status.hidden = true;
   document.body.appendChild(status);
+  var subtitleTracks = [], subtitleIndex = -1, subtitleDelay = 0;
+  var subtitlePanel = document.createElement('section');
+  subtitlePanel.className = 'subtitle-panel'; subtitlePanel.hidden = true;
+  subtitlePanel.setAttribute('role', 'dialog'); subtitlePanel.setAttribute('aria-label', 'Subtitles');
+  document.body.appendChild(subtitlePanel);
+  function hideSubtitlesMenu() { subtitlePanel.hidden = true; }
+  function subtitleButton(label, action) {
+    var button = document.createElement('button'); button.textContent = label; button.onclick = action;
+    subtitlePanel.appendChild(button); return button;
+  }
+  function selectSubtitle(index) {
+    try {
+      if (index >= 0) av.setSelectTrack('TEXT', index);
+      av.setSilentSubtitle(index < 0);
+      subtitleIndex = index;
+      localStorage.setItem('mw-subtitles', index < 0 ? 'off' : 'on');
+      showSubtitlesMenu();
+    } catch (e) { subtitleNotice.textContent = 'This subtitle track is unavailable: ' + e.message; }
+  }
+  var subtitleNotice;
+  function showSubtitlesMenu() {
+    subtitlePanel.textContent = '';
+    var heading = document.createElement('h2'); heading.textContent = 'Subtitles'; subtitlePanel.appendChild(heading);
+    var selected = subtitleButton((subtitleIndex < 0 ? '✓ ' : '') + 'Off', function () { selectSubtitle(-1); });
+    subtitleTracks.forEach(function (track) {
+      var info = track.extra_info || {};
+      if (typeof info === 'string') { try { info = JSON.parse(info); } catch (e) { info = {}; } }
+      var label = info.track_lang || info.language || ('Track ' + (track.index + 1));
+      var button = subtitleButton((track.index === subtitleIndex ? '✓ ' : '') + label, function () { selectSubtitle(track.index); });
+      if (track.index === subtitleIndex) selected = button;
+    });
+    subtitleNotice = document.createElement('p'); subtitleNotice.setAttribute('role', 'status');
+    subtitleNotice.textContent = subtitleTracks.length ? 'Timing: ' + (subtitleDelay / 1000).toFixed(1) + ' seconds' : 'No embedded subtitles available in this movie.';
+    subtitlePanel.appendChild(subtitleNotice);
+    function adjust(delta) {
+      try {
+        var next = Math.max(-30000, Math.min(30000, subtitleDelay + delta));
+        av.setSubtitlePosition(next); subtitleDelay = next;
+        subtitleNotice.textContent = 'Timing: ' + (subtitleDelay / 1000).toFixed(1) + ' seconds';
+      } catch (e) { subtitleNotice.textContent = 'Timing adjustment is unavailable for this track.'; }
+    }
+    if (subtitleIndex >= 0) {
+      subtitleButton('Show 0.5s earlier', function () { adjust(-500); });
+      subtitleButton('Show 0.5s later', function () { adjust(500); });
+    }
+    subtitleButton('Close', hideSubtitlesMenu);
+    subtitlePanel.hidden = false; selected.focus();
+  }
+  function initialiseSubtitles() {
+    subtitleTracks = []; subtitleIndex = -1; subtitleDelay = 0;
+    try {
+      subtitleTracks = av.getTotalTrackInfo().filter(function (track) { return track.type === 'TEXT'; });
+      if (localStorage.getItem('mw-subtitles') === 'on' && subtitleTracks.length) {
+        var english = subtitleTracks.filter(function (track) { return /\b(en|eng|english)\b/i.test(JSON.stringify(track.extra_info)); })[0];
+        subtitleIndex = (english || subtitleTracks[0]).index;
+        av.setSelectTrack('TEXT', subtitleIndex);
+      }
+      av.setSilentSubtitle(subtitleIndex < 0);
+    } catch (e) { /* Unsupported subtitle APIs must not prevent the movie playing. */ }
+  }
   function message(text) { statusText.textContent = text; status.hidden = !text; statusStop.hidden = !job && !opening; }
   function request(method, path, data) {
     return ready.then(function () {
@@ -99,6 +159,7 @@
     return request('POST', '/api/tizen/' + job.id + '/progress', {state:state, position:position, duration:duration});
   }
   function close(state) {
+    hideSubtitlesMenu(); subtitleTracks = []; subtitleIndex = -1; subtitleDelay = 0;
     generation++; opening = false;
     clearInterval(timer); clearTimeout(polling);
     if (job) {
@@ -133,8 +194,10 @@
         if (version !== generation) return;
         try {
           av.play(); opening = false;
+          initialiseSubtitles();
           if (current.start_at) av.seekTo(Math.min(current.start_at * 1000, Math.max(0, av.getDuration() - 5000)));
-          document.body.classList.add('mw-playing'); message('');
+          document.body.classList.add('mw-playing'); message('Press Down for subtitles');
+          setTimeout(function () { if (version === generation && statusText.textContent === 'Press Down for subtitles') message(''); }, 4000);
           report('playing').catch(fail);
           timer = setInterval(function () {
             report(av.getState() === 'PAUSED' ? 'paused' : 'playing').then(function (data) {
@@ -174,10 +237,21 @@
     if (!job && !opening) {
       return;
     }
-    if ([10009, 27, 13, 415, 19, 10252, 413, 37, 39, 412, 417].indexOf(key) < 0) return;
+    if (!subtitlePanel.hidden) {
+      if ([10009, 27, 13, 37, 38, 39, 40].indexOf(key) >= 0) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (key === 10009 || key === 27) { hideSubtitlesMenu(); return; }
+        if (key === 13) { document.activeElement.click(); return; }
+        var buttons = Array.from(subtitlePanel.querySelectorAll('button'));
+        var next = buttons.indexOf(document.activeElement) + ((key === 37 || key === 38) ? -1 : 1);
+        buttons[(next + buttons.length) % buttons.length].focus(); return;
+      }
+    }
+    if ([10009, 27, 13, 415, 19, 10252, 413, 37, 39, 40, 460, 412, 417].indexOf(key) < 0) return;
     event.preventDefault(); event.stopImmediatePropagation();
     if (key === 10009 || key === 27 || key === 413) { close(); return; }
     if (!job || !job.media_url || opening) return;
+    if (key === 40 || key === 460) { showSubtitlesMenu(); return; }
     try {
       if (key === 37 || key === 39 || key === 412 || key === 417) {
         av.seekTo(Math.max(0, Math.min(av.getDuration() - 1000, av.getCurrentTime() + ((key === 37 || key === 412) ? -30000 : 30000))));
@@ -189,5 +263,5 @@
   }, true);
   document.addEventListener('visibilitychange', function () { if (document.hidden) close(); });
   window.addEventListener('pagehide', function () { close(); });
-  try { ['MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop', 'MediaRewind', 'MediaFastForward'].forEach(function (key) { tizen.tvinputdevice.registerKey(key); }); } catch (e) { /* Browser preview. */ }
+  try { ['MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop', 'MediaRewind', 'MediaFastForward', 'Subtitle'].forEach(function (key) { tizen.tvinputdevice.registerKey(key); }); } catch (e) { /* Browser preview. */ }
 }());
