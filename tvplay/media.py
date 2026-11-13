@@ -26,6 +26,7 @@ class MediaFile:
     wait: object = None
     read_at: object = None
     streaming: bool = False
+    subtitle_url: str | None = None
 
 
 class GrowingFile:
@@ -285,6 +286,9 @@ class MediaServer:
                 self.send_header("Content-Length", str(length))
                 self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Cache-Control", "no-store")
+                if media.subtitle_url:
+                    self.send_header("CaptionInfo.sec", media.subtitle_url)
+                    self.send_header("CaptionInfoEx.sec", media.subtitle_url)
                 if status == 206:
                     self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
                 if self.headers.get("getcontentFeatures.dlna.org") == "1":

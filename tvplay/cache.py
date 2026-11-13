@@ -23,6 +23,9 @@ class Cache:
         return config.CACHE_DIR / name
 
     def remove_partials(self):
+        # Caption files belong to sessions, which cannot survive a server restart.
+        for leftover in config.CACHE_DIR.glob("caption-*.srt"):
+            unlink(leftover)
         for leftover in config.CACHE_DIR.glob("*.part"):
             leftover.unlink(missing_ok=True)
 

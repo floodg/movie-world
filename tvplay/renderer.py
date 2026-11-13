@@ -102,7 +102,7 @@ def protocol_info(mime):
     return f"http-get:*:{mime}:{DLNA_FLAGS}"
 
 
-def didl_metadata(title, url, mime, size=None, duration=None):
+def didl_metadata(title, url, mime, size=None, duration=None, subtitle_url=None):
     attrs = [f'protocolInfo="{escape(protocol_info(mime))}"']
     if size:
         attrs.append(f'size="{int(size)}"')
@@ -112,12 +112,13 @@ def didl_metadata(title, url, mime, size=None, duration=None):
         '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
         'xmlns:dc="http://purl.org/dc/elements/1.1/" '
         'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
-        'xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">'
+        'xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/" xmlns:sec="http://www.sec.co.kr/">'
         '<item id="movie-world-0" parentID="-1" restricted="1">'
         f"<dc:title>{escape(title)}</dc:title>"
         "<upnp:class>object.item.videoItem.movie</upnp:class>"
         f"<res {' '.join(attrs)}>{escape(url)}</res>"
-        "</item></DIDL-Lite>"
+        + (f'<sec:CaptionInfoEx sec:type="srt">{escape(subtitle_url)}</sec:CaptionInfoEx>' if subtitle_url else "")
+        + "</item></DIDL-Lite>"
     )
 
 

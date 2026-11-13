@@ -614,11 +614,11 @@ class Handler(BaseHTTPRequestHandler):
             if problem:
                 self.send_json({"error": problem, "code": "forbidden"}, 403)
                 return
-            body = self.read_json()
+            body = self.read_json(max_length=12 * 1024 * 1024 if parts == ["api", "playback"] else MAX_BODY)
             if body is None:
                 return
         if parts == ["api", "tv", "session"] and method == "GET":
-            self.send_json({"enabled": True})
+            self.send_json({"enabled": True, "subtitles": True})
             return
         manager = self.tv.manager
         try:
@@ -643,7 +643,7 @@ class Handler(BaseHTTPRequestHandler):
                 job, created = self.tv.call(
                     manager.create(
                         movie, renderer_id, body.get("idempotency_key"), body.get("replace") is True, body.get("start_at"),
-                        cached_only=body.get("cached_only") is True
+                        cached_only=body.get("cached_only") is True, subtitle_srt=body.get("subtitle_srt")
                     )
                 )
                 self.send_json({"job": job}, 202 if created else 200)
@@ -754,12 +754,12 @@ class Handler(BaseHTTPRequestHandler):
         except (TimeoutError, OSError) as exc:
             self.send_json({"error": "PC playback service unavailable. Try again.", "code": "unavailable"}, 503)
 
-    def read_json(self):
+    def read_json(self, max_length=MAX_BODY):
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = -1
-        if length < 0 or length > MAX_BODY:
+        if length < 0 or length > max_length:
             self.send_json({"error": "Request too large", "code": "bad_request"}, 413)
             return None
         raw = self.rfile.read(length) if length else b"{}"

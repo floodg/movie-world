@@ -10,3 +10,4 @@ web/cloud-config.js
 tizen/node_modules/
 
 .codex-attachments/
+.codex-remote-attachments/

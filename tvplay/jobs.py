@@ -18,7 +18,8 @@ from . import config, formats, store
 from .cache import Cache, disk_full, mime_for, safe_name, unlink
 from .errors import PlaybackError
 from .links import parse_message_link
-from .media import ActiveReads, GrowingFile, MediaServer
+from .media import ActiveReads, GrowingFile, MediaServer, MediaFile
+from .subtitles import validate_srt
 from .netutil import local_ip_for
 from .renderer import RendererRegistry, didl_metadata, seconds_to_hms, upnp_error
 from .telegram_dl import TelegramSource
@@ -120,7 +121,16 @@ class JobManager:
 
     def resolve_media(self, token):
         """Media-server lookup. A download still in progress is served at its final size, and readers wait for bytes."""
+        for job in list(self.jobs.values()):
+            caption = job.get("_caption")
+            if caption and job["state"] not in TERMINAL and caption["token"] == token:
+                return MediaFile(job["cache_id"], caption["path"], "application/x-subrip")
         media = self.cache.resolve_token(token)
+        if media is not None:
+            for job in list(self.jobs.values()):
+                if job["state"] not in TERMINAL and job.get("cache_id") == media.key:
+                    media.subtitle_url = job.get("_caption", {}).get("url")
+                    break
         if media is None:
             return None
         growing = self.growing.get(token)
@@ -295,7 +305,8 @@ class JobManager:
         channel, message = parse_message_link(movie.get("telegram_url"))
         return self.cache.lookup(channel, message)
 
-    async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None, cached_only=False):
+    async def create(self, movie, renderer_id, idempotency_key=None, replace=False, start_at=None, cached_only=False, subtitle_srt=None):
+        subtitle_srt = validate_srt(subtitle_srt)
         if start_at is not None and (
             not isinstance(start_at, (int, float)) or isinstance(start_at, bool) or not math.isfinite(start_at) or start_at < 0
         ):
@@ -345,6 +356,7 @@ class JobManager:
             "retryable": 0,
             "cache_id": cached["id"] if cached else None,
             "_cached_only": cached_only,
+            "_subtitle_srt": subtitle_srt,
             "created_at": now,
             "updated_at": now,
             "progress": None,
@@ -501,6 +513,10 @@ class JobManager:
             traceback.print_exc()
             self._fail(job, PlaybackError(f"Unexpected error on the PC: {exc}", "internal", retryable=True))
         finally:
+            job.pop("_subtitle_srt", None)
+            caption = job.pop("_caption", None)
+            if caption:
+                unlink(caption["path"])
             try:
                 await self._cleanup_job_files(job)
             except Exception:
@@ -1070,8 +1086,20 @@ class JobManager:
             if mime != entry["mime"]:
                 store.execute("UPDATE cache_entries SET mime = ? WHERE id = ?", (mime, entry["id"]))
             ext = os.path.splitext(entry["play_name"])[1]
-            url = self.media.url_for(host, entry["token"], f"movie{ext}")
-            metadata = didl_metadata(job["title"], url, mime, entry["play_size"], entry["duration"])
+            # Samsung can retain subtitle state when SetAVTransportURI reuses a
+            # movie URL. Give each session a fresh URL while serving the same cache.
+            url = self.media.url_for(host, entry["token"], f"movie-{job['id']}{ext}")
+            subtitle_url = None
+            if job.get("_subtitle_srt"):
+                previous_caption = job.pop("_caption", None)
+                if previous_caption:
+                    unlink(previous_caption["path"])
+                token = uuid.uuid4().hex
+                path = self.cache.path(f"caption-{token}.srt")
+                path.write_bytes(job["_subtitle_srt"].encode("utf-8"))
+                subtitle_url = self.media.url_for(host, token, "subtitles.srt")
+                job["_caption"] = {"token": token, "path": path, "url": subtitle_url}
+            metadata = didl_metadata(job["title"], url, mime, entry["play_size"], entry["duration"], subtitle_url=subtitle_url)
             state, _ = await renderer.transport_info()
             if state not in ("STOPPED", "NO_MEDIA_PRESENT"):
                 await renderer.stop()

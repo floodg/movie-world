@@ -138,7 +138,13 @@ class CachedApiTests(unittest.TestCase):
         self.manager.create.return_value = ({'id': 'abc'}, True)
         self.assertEqual(self.request('/api/playback', dict(movie_id=1, renderer_id='uuid:tv',
                          cached_only=True, start_at=400, idempotency_key='android-key')), {'job': {'id': 'abc'}})
-        self.manager.create.assert_called_once_with(self.movie, 'uuid:tv', 'android-key', False, 400, cached_only=True)
+        self.manager.create.assert_called_once_with(self.movie, 'uuid:tv', 'android-key', False, 400, cached_only=True, subtitle_srt=None)
+
+    def test_android_subtitle_upload_larger_than_normal_json_limit(self):
+        srt = '1\n00:00:01,000 --> 00:00:03,000\n' + 'Caption text ' * 1000 + '\n'
+        self.manager.create.return_value = ({'id': 'abc'}, True)
+        self.request('/api/playback', dict(movie_id=1, renderer_id='uuid:tv', cached_only=True, subtitle_srt=srt))
+        self.assertEqual(self.manager.create.call_args.kwargs['subtitle_srt'], srt)
 
 
 if __name__ == '__main__':
