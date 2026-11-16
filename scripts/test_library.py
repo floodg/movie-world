@@ -24,7 +24,7 @@ class LibraryTests(unittest.IsolatedAsyncioTestCase):
         self.paths = patch.multiple(config, LOCAL=root, JOBS_DB=root/'jobs.sqlite', CACHE_DIR=root/'cache')
         self.paths.start()
         store.init()
-        self.manager = SimpleNamespace(cache=Cache({}, ActiveReads()), jobs={}, uploads={}, settings={}, telegram=Mock())
+        self.manager = SimpleNamespace(cache=Cache({}, ActiveReads()), jobs={}, uploads={}, settings={'auto_whisper': True}, telegram=Mock())
         self.library = Library(self.manager)
         self.manager._protected_ids = lambda: self.library.protected
         self.library.start()
@@ -95,6 +95,53 @@ class LibraryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.library.downloading)
         self.assertFalse(self.library.protected)
         self.assertEqual(store.query_all('SELECT * FROM cache_entries'), [])
+
+    async def test_disabled_whisper_keeps_download_and_does_not_start_inference(self):
+        self.cached()
+        self.manager.settings['auto_whisper'] = False
+        with patch('asyncio.create_subprocess_exec', AsyncMock()) as process:
+            await self.library.prepare(MOVIE)
+        process.assert_not_awaited()
+        self.assertIsNotNone(self.manager.cache.lookup(123,456))
+
+    async def test_setting_persists_and_stops_running_whisper(self):
+        process = Mock(returncode=None)
+        self.library.process = process
+        with patch('tvplay.config.save') as save:
+            result = await self.library.whisper_settings(False)
+        self.assertEqual(result, {'auto_whisper':False})
+        self.assertFalse(save.call_args.args[0]['auto_whisper'])
+        process.kill.assert_called_once()
+        self.assertFalse(self.library.whisper_enabled())
+
+    async def test_disabling_during_spawn_kills_worker_and_preserves_download(self):
+        entry = self.cached()
+        spawning, release = asyncio.Event(), asyncio.Event()
+        process = Mock(returncode=None, communicate=AsyncMock(), wait=AsyncMock())
+
+        async def spawn(*args, **kwargs):
+            spawning.set()
+            await release.wait()
+            return process
+
+        with patch('asyncio.create_subprocess_exec', side_effect=spawn), patch('tvplay.config.save'):
+            task = asyncio.create_task(self.library.prepare(MOVIE))
+            try:
+                await asyncio.wait_for(spawning.wait(), 2)
+                self.assertIsNone(self.library.process)
+                await self.library.whisper_settings(False)
+                release.set()
+                await asyncio.wait_for(task, 2)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+        process.kill.assert_called_once()
+        process.wait.assert_awaited_once()
+        process.communicate.assert_not_awaited()
+        self.assertIsNone(self.library.process)
+        self.assertFalse(self.library.protected)
+        self.assertEqual(self.manager.cache.lookup(123, 456)['id'], entry['id'])
 
 
 if __name__ == '__main__':

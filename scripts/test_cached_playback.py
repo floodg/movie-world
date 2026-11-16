@@ -143,6 +143,13 @@ class CachedApiTests(unittest.TestCase):
         self.manager.library.caption.return_value = 'cached SRT'
         self.assertEqual(self.request('/api/playback/captions/1'), {'srt': 'cached SRT'})
 
+    def test_whisper_settings_read_and_write(self):
+        self.manager.library.whisper_settings.return_value = {'auto_whisper': False}
+        self.assertEqual(self.request('/api/playback/settings'), {'auto_whisper': False})
+        self.manager.library.whisper_settings.assert_called_with(None)
+        self.assertEqual(self.request('/api/playback/settings', {'auto_whisper': False}), {'auto_whisper': False})
+        self.manager.library.whisper_settings.assert_called_with(False)
+
     def test_unknown_movie_is_cache_miss(self):
         self.detail.stop()
         self.detail = patch.object(server, 'movie_detail', return_value=None)

@@ -27,6 +27,7 @@ DEFAULTS = {
     "pairing_code": None,
     "whisper_model": "small",
     "whisper_threads": 2,
+    "auto_whisper": False,
 }
 
 
