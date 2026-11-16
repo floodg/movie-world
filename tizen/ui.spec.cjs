@@ -103,7 +103,7 @@ test('subtitle menu handles movies with no subtitles', async ({page}) => {
 
 test('Kotlin home theme, fonts, tabs and launcher icon',async ({page}) => {
   await expect(page.locator('.wordmark')).toHaveText('MOVIEWORLD');
-  await expect(page.locator('.tabs button')).toHaveText(['Home','Search','My List']);
+  await expect(page.locator('.tabs button')).toHaveText(['Home','Search','My List','History']);
   await expect(page.locator('body')).toHaveCSS('background-color','rgb(10, 10, 15)');
   await expect(page.locator('.hero .primary')).toHaveCSS('background-color','rgb(245, 165, 36)');
   await expect(page.locator('.hero h1')).toHaveCSS('font-family',/RobotoCondensed/);
@@ -213,4 +213,57 @@ test('remote navigation, settings focus trap, and preparation cancellation', asy
   await page.keyboard.press('Escape');
   await cancel;
   await expect(page.locator('.player-status')).toBeHidden();
+});
+
+test('selector starts on the first movie; title is not selectable; settings is the top stop', async ({page}) => {
+  await expect(page.locator('#screen .poster').first()).toBeFocused();
+  expect(await page.locator('.wordmark').evaluate(node => node.tagName + node.tabIndex)).toBe('DIV-1');
+  const box = await page.locator('#settings-open').boundingBox();
+  expect(Math.abs(box.width - box.height)).toBeLessThan(1.5);
+  await page.keyboard.press('ArrowUp');
+  await expect(page.locator('.hero button:focus')).toHaveCount(1);
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowUp');
+  await expect(page.locator('#settings-open')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('.hero button:focus')).toHaveCount(1);
+});
+
+test('poster row scrolls under the selector until the end, then the selector moves', async ({page}) => {
+  const many = Array.from({length: 24}, (_, i) => ({...movie, id: 100 + i, title: 'Movie ' + i}));
+  await page.route('**/api/tizen-catalogue/home*', route => route.fulfill({json:{featured:movie,top_rated:many,genres:[],rows:[]},headers:{'Access-Control-Allow-Origin':'*'}}));
+  await page.reload();
+  const row = page.locator('.rail[aria-label="Top Rated"] .poster-row');
+  const first = row.locator('.poster').first();
+  await expect(page.locator('#screen .poster').first()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(first).toBeFocused();
+  const left = () => page.evaluate(() => document.activeElement.getBoundingClientRect().left);
+  const start = await left();
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
+  expect(await row.evaluate(node => node.scrollLeft)).toBeGreaterThan(0);
+  expect(Math.abs(await left() - start)).toBeLessThan(2);
+  for (let i = 0; i < 15; i++) await page.keyboard.press('ArrowRight');
+  await expect(row.locator('.poster').last()).toBeFocused();
+  const atEnd = await row.evaluate(node => [node.scrollLeft, node.scrollWidth - node.clientWidth, document.activeElement.getBoundingClientRect().right, innerWidth]);
+  expect(atEnd[0]).toBeGreaterThanOrEqual(atEnd[1] - 1);
+  expect(atEnd[2]).toBeLessThanOrEqual(atEnd[3]);
+  expect(await left()).toBeGreaterThan(start + 100);
+  await page.keyboard.press('ArrowLeft');
+  expect(await row.evaluate((node, end) => node.scrollLeft >= end - 1, atEnd[1])).toBe(true);
+  for (let i = 0; i < 40; i++) await page.keyboard.press('ArrowLeft');
+  await expect(first).toBeFocused();
+  expect(await row.evaluate(node => node.scrollLeft)).toBe(0);
+});
+
+test('History tab lists watched movies newest first', async ({page}) => {
+  await page.locator('[data-tab="history"]').click();
+  await expect(page.locator('#screen')).toContainText('No watch history yet');
+  await page.evaluate(([a, b]) => {
+    localStorage.setItem('movie-world-watch-progress', JSON.stringify([{movie_id:a.id,movie:a,position:5,duration:10},{movie_id:b.id,movie:b,position:5,duration:10}]));
+  }, [other, movie]);
+  await page.reload();
+  await page.locator('[data-tab="history"]').click();
+  await expect(page.locator('[data-tab="history"]')).toHaveAttribute('aria-current','page');
+  await expect(page.locator('#screen .poster')).toHaveText([other.title, movie.title].map(t => new RegExp(t)));
+  await expect(page.locator('#screen .poster').first()).toBeFocused();
 });

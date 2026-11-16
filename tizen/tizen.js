@@ -24,11 +24,25 @@
   var status = document.createElement('div');
   status.className = 'player-status';
   status.setAttribute('role', 'status');
+  var statusThumb = document.createElement('img');
+  statusThumb.className = 'status-thumb'; statusThumb.alt = ''; statusThumb.hidden = true;
+  statusThumb.onerror = function () { statusThumb.hidden = true; };
+  var statusBody = document.createElement('div');
+  statusBody.className = 'status-body';
   var statusTitle = document.createElement('strong');
   var statusText = document.createElement('span');
+  statusBody.appendChild(statusTitle); statusBody.appendChild(statusText);
   var statusStop = document.createElement('button');
   statusStop.textContent = 'Stop'; statusStop.onclick = function () { close(); };
-  status.appendChild(statusTitle); status.appendChild(statusText); status.appendChild(statusStop);
+  var statusBar = document.createElement('div');
+  statusBar.className = 'status-progress indeterminate';
+  var statusFill = document.createElement('span');
+  statusBar.appendChild(statusFill);
+  function setProgress(fraction) {
+    if (fraction == null) { statusBar.className = 'status-progress indeterminate'; statusFill.style.width = ''; }
+    else { statusBar.className = 'status-progress'; statusFill.style.width = Math.max(0, Math.min(100, fraction * 100)) + '%'; }
+  }
+  status.appendChild(statusThumb); status.appendChild(statusBody); status.appendChild(statusStop); status.appendChild(statusBar);
   status.hidden = true;
   document.body.appendChild(status);
   var subtitleTracks = [], subtitleIndex = -1, subtitleDelay = 0;
@@ -91,7 +105,10 @@
       av.setSilentSubtitle(subtitleIndex < 0);
     } catch (e) { /* Unsupported subtitle APIs must not prevent the movie playing. */ }
   }
-  function message(text) { statusText.textContent = text; status.hidden = !text; statusStop.hidden = !job && !opening; }
+  function message(text) {
+    statusText.textContent = text; status.hidden = !text; statusStop.hidden = !job && !opening;
+    document.body.classList.toggle('mw-status', !status.hidden);
+  }
   function request(method, path, data) {
     return ready.then(function () {
       return new Promise(function (resolve, reject) {
@@ -216,13 +233,16 @@
       if (!job.active) { fail(new Error((job.error || {}).message || job.detail)); return; }
       if (job.media_url) { play(job); return; }
       var progress = job.progress || {};
+      setProgress(progress.total ? progress.done / progress.total : null);
       message((job.detail || job.state) + (progress.total ? ' ' + Math.floor(progress.done / progress.total * 100) + '%' : ''));
       polling = setTimeout(poll, 1500);
     }).catch(function (e) { if (version === generation) fail(e); });
   }
   window.MovieWorldTv = {settings:settings, stop:close, play:function (movie, restart) {
       if (job || opening) { message('Stop the current movie with Back first.'); return; }
-      statusTitle.textContent = movie.title;
+      statusTitle.textContent = movie.title; setProgress(null);
+      statusThumb.hidden = !/^https:\/\/image\.tmdb\.org\//.test(movie.poster_url || '');
+      if (!statusThumb.hidden) statusThumb.src = movie.poster_url;
       opening = true; message('Preparing movie…');
       var version = ++generation;
       var body = {movie_id:movie.id, idempotency_key:'tv_' + Date.now()};

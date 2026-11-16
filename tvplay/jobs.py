@@ -67,6 +67,8 @@ class JobManager:
         self.uploads = {}
         self.growing = {}
         self.discovery_task = None
+        from .library import Library
+        self.library = Library(self)
 
     async def begin_upload(self, movie, size, ext):
         from .cache import MIME_BY_EXT
@@ -109,10 +111,12 @@ class JobManager:
         store.init()
         self.cache.remove_incomplete()
         self._reconcile()
+        self.library.start()
         self.media.start()
         self.discovery_task = asyncio.create_task(self._discover())
 
     async def close(self):
+        await self.library.close()
         for job_id in list(self.tasks):
             self.tasks[job_id].cancel()
         await self.telegram.close()
@@ -449,10 +453,15 @@ class JobManager:
         }
 
     def _set(self, job, state, detail=None, persist=True):
+        previous_state = job['state']
         changed = job["state"] != state or job.get("detail") != detail
         job["state"] = state
         job["detail"] = detail
         job["updated_at"] = store.now()
+        if previous_state != state:
+            from .operations import event
+            event('playback', f'{job.get("title", "Movie")} · {state} · {job.get("error") or detail or ""}',
+                  'error' if state == 'failed' else 'info', job.get('movie_id'))
         if persist and changed:
             store.execute(
                 "UPDATE jobs SET state = ?, detail = ?, error = ?, error_code = ?, retryable = ?, cache_id = ?, updated_at = ? WHERE id = ?",
@@ -491,6 +500,10 @@ class JobManager:
     async def _run(self, job):
         try:
             channel_id, message_id = parse_message_link(job["telegram_url"])
+            background = self.library.downloading.get(job["telegram_url"]) if hasattr(self, "library") else None
+            if background:
+                self._set(job, "downloading", "Waiting for the background movie download")
+                await asyncio.shield(background)
             entry = self.cache.lookup(channel_id, message_id)
             if entry is not None:
                 job["cache_id"] = entry["id"]
@@ -526,6 +539,8 @@ class JobManager:
             self.tasks.pop(job["id"], None)
 
     async def _play_ready(self, job, entry):
+        if not job.get("_subtitle_srt") and hasattr(self, "library"):
+            job["_subtitle_srt"] = self.library.caption(job)
         entry = await self._prepare(job, entry)
         if job["renderer_id"].startswith("tizen:"):
             host = self.settings.get("media_host") or local_ip_for(job["renderer_id"][6:])
@@ -1019,7 +1034,7 @@ class JobManager:
             pass
 
     def _protected_ids(self):
-        return {job["cache_id"] for job in self.jobs.values() if job["state"] not in TERMINAL and job.get("cache_id")}
+        return (self.library.protected if hasattr(self, "library") else set()) | {job["cache_id"] for job in self.jobs.values() if job["state"] not in TERMINAL and job.get("cache_id")}
 
     # Format preparation
 

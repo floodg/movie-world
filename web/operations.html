@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Operation history · Movie World</title><link rel="stylesheet" href="/operations.css"><script src="/operations.js" defer></script></head>
+<body><main>
+<a class="back" href="/">← Movie World</a>
+<header><div><p class="eyebrow">MOVIE WORLD / ACTIVITY</p><h1>Operation history</h1><p>Downloads, captions, playback and phone commands in one place.</p></div><button id="refresh">Refresh</button></header>
+<div class="filters"><label>Device<select id="source"><option value="">All devices</option><option value="server">PC server</option><option value="android">Android app</option></select></label><label>Status<select id="level"><option value="">All statuses</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Information</option></select></label><label class="search">Search<input id="query" type="search" placeholder="Operation, message or movie ID" maxlength="120"></label></div>
+<p id="status" role="status">Loading history…</p><section id="events" aria-label="Operation events"></section><button id="older" hidden>Load older events</button>
+<footer>Newest received first. Times use your device’s timezone. The PC keeps the latest 5,000 events. Phone events arrive when the app can reach the PC. Logging begins with this update.</footer>
+</main></body></html>

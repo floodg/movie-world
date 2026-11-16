@@ -1,0 +1,4 @@
+# Optional PC background caption generation (CPU, no hosted API key).
+faster-whisper>=1.2,<2
+# PyAV 19 removed metadata_errors, still used by faster-whisper 1.2.
+av>=11,<17

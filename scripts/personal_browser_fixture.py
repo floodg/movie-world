@@ -12,6 +12,7 @@ with tempfile.TemporaryDirectory() as folder:
         personal=PersonalStore(Path(folder)/"browser.sqlite")
         personal_sync=None
         def log_message(self,*args):pass
+        def log_request(self,*args):pass
     http=ThreadingHTTPServer(("127.0.0.1",0),Handler)
     print(json.dumps({"port":http.server_port}),flush=True)
     try:http.serve_forever()

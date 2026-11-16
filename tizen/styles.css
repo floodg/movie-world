@@ -35,3 +35,18 @@ body.mw-playing{background:transparent!important}body.mw-playing>.top,body.mw-pl
    screen padding 16dp, navigation bar 80dp, landscape hero/backdrop 82%/70%. */
 button{min-height:3.43rem;border-radius:999px}.top{padding:.57rem 1.14rem}.hero{height:82vh}.hero-copy{left:1.14rem}.hero .meta{margin:.57rem 0 1.14rem}.rail h2{padding:0 1.14rem}.poster-row{padding-left:1.14rem;padding-right:1.14rem}.tabs{height:5.71rem}#screen{padding-bottom:7.4rem}.page{padding-left:1.14rem;padding-right:1.14rem}.detail-cover{height:70vh}.detail-content{padding-left:1.14rem;padding-right:1.14rem;margin-top:0}.detail .actions>.primary{flex:0 0 100%;width:100%;min-width:0}.player-status{bottom:6.4rem}.poster{border-radius:.57rem}.tabs button{border-radius:0}.back{min-height:3rem}
 @media(max-width:800px){html{font-size:16px}.hero-copy{width:85%;left:1rem}.hero{height:70vh}.hero h1{font-size:2.2rem}.hero .actions{width:100%}.page{padding:5rem 1rem 2rem}.tabs button{min-width:0;flex:1;padding:.4rem 1rem}.detail .primary{min-width:0}.detail-content{padding:0 1rem 2rem}.settings-panel form{margin:3rem 0}.poster{width:7rem;height:10.5rem}.filters input{width:6rem}.rail h2{padding:0 1rem}.poster-row{padding-left:1rem}}
+/* Remote-navigation refinements: Kotlin-style tab bar and now-playing bar, round settings button. */
+.wordmark{user-select:none;-webkit-user-select:none;cursor:default}
+.icon-button{display:flex;align-items:center;justify-content:center;width:3.43rem;height:3.43rem;min-width:3.43rem;padding:0;border-radius:50%;background:rgba(10,10,15,.6)}
+.icon-button svg{width:1.8rem;height:1.8rem;margin:0}.icon-button:focus{background:var(--amber);color:var(--on-amber)}
+.icon-button svg,.tabs svg{fill:currentColor;stroke:none}
+.tabs button:focus{outline-offset:-6px;background:var(--surface2)}
+.player-status{display:flex;align-items:center;left:0;right:0;bottom:5.71rem;border:0;border-radius:0;padding:.57rem 1.14rem;min-height:4.3rem}
+.status-thumb{width:2.3rem;height:3.43rem;border-radius:.57rem;object-fit:cover;margin-right:1rem;flex:none}
+.status-body{flex:1;min-width:0}.status-body strong,.status-body span{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.player-status button{position:static;margin-left:1rem;flex:none}
+.status-progress{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--surface3);overflow:hidden}.status-progress span{display:block;height:100%;width:0;background:var(--amber)}
+.status-progress.indeterminate span{width:35%;animation:slide 1.2s ease-in-out infinite}@keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
+body.mw-status #screen{padding-bottom:12rem}
+body.detail-open .player-status{bottom:0}
+body.mw-playing .player-status{left:2rem;right:2rem;bottom:2rem;border:1px solid var(--outline);border-radius:1.1rem}body.mw-playing .status-progress,body.mw-playing .status-thumb{display:none}

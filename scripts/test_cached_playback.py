@@ -100,6 +100,8 @@ class CachedApiTests(unittest.TestCase):
             tv = service
             def log_message(self, *args):
                 pass
+            def log_request(self, *args):
+                pass
         self.http = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
@@ -126,6 +128,20 @@ class CachedApiTests(unittest.TestCase):
         self.manager.create.assert_not_called()
         self.manager.cached_movie.return_value = None
         self.assertEqual(self.request('/api/playback/cache/1'), {'cached': False})
+
+    def test_favourite_preparation_queues_without_controlling_renderer(self):
+        self.manager.library.request.return_value = {'movie_id': 1, 'state': 'queued'}
+        self.assertEqual(self.request('/api/playback/prepare', {'movie_id': 1}),
+                         {'preparation': {'movie_id': 1, 'state': 'queued'}})
+        self.manager.library.request.assert_called_once_with(self.movie)
+        self.manager.create.assert_not_called()
+        self.manager.control.assert_not_called()
+
+    def test_preparation_status_and_captions(self):
+        self.manager.library.status.return_value = {'state': 'transcribing'}
+        self.assertEqual(self.request('/api/playback/preparation/1'), {'preparation': {'state': 'transcribing'}})
+        self.manager.library.caption.return_value = 'cached SRT'
+        self.assertEqual(self.request('/api/playback/captions/1'), {'srt': 'cached SRT'})
 
     def test_unknown_movie_is_cache_miss(self):
         self.detail.stop()
