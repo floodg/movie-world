@@ -673,7 +673,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         manager = self.tv.manager
         try:
-            if parts == ["api", "playback", "prepare"] and method == "POST":
+            if parts == ["api", "playback", "settings"] and method in ('GET', 'POST'):
+                if method == 'POST' and not isinstance(body.get('auto_whisper'), bool):
+                    self.send_json({'error': 'Automatic Whisper must be on or off.', 'code': 'bad_request'}, 400)
+                    return
+                self.send_json(self.tv.call(manager.library.whisper_settings(body['auto_whisper'] if method == 'POST' else None)))
+            elif parts == ["api", "playback", "prepare"] and method == "POST":
                 movie_id = body.get("movie_id")
                 if not isinstance(movie_id, int) or isinstance(movie_id, bool):
                     self.send_json({"error": "Choose a movie.", "code": "bad_request"}, 400)

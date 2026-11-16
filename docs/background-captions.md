@@ -6,9 +6,19 @@ available. Keys are encrypted on the phone. Downloads are bounded ZIP archives;
 only single-file SRT releases are accepted. Existing subtitle timing and caching
 controls apply to both providers.
 
+Automatic Whisper is **off by default**. In Android TV settings, use **PC captions →
+Automatic Whisper captions** to enable or disable it on the PC. The switch requires
+the home PC to be reachable and applies to all devices using that PC. Turning it
+off stops active inference, leaves movie downloads running and keeps existing
+caption files. Turning it on affects preparation jobs that have not completed;
+it does not backfill already completed favourites.
+
 Adding a movie to favourites on Android schedules a persistent WorkManager command
 to the configured PC server. Wi-Fi and an available PC are required; the command
-retries with backoff while offline. Removing the favourite before delivery skips
+retries with backoff while offline. On mobile data or away from home Wi-Fi, the
+favourite saves immediately and its PC command waits until the PC is reachable
+over Wi-Fi; this command does not download the movie to the phone. Android may
+delay retries to conserve battery. Removing the favourite before delivery skips
 the command. Removing it after delivery does not delete the download.
 
 Browser favourite additions received through personal sync also queue preparation.

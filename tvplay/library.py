@@ -32,11 +32,11 @@ class Library:
         row = self.status(movie["id"])
         if row and row["state"] != "failed":
             channel, message = parse_message_link(movie.get("telegram_url"))
-            if row["state"] != "ready" or (self.caption(movie) and self.manager.cache.lookup(channel, message)):
+            if row["state"] != "ready" or ((not self.whisper_enabled() or self.caption(movie)) and self.manager.cache.lookup(channel, message)):
                 return row
         store.execute("INSERT OR REPLACE INTO library_queue VALUES (?,?,'queued',NULL,?)",
                       (movie["id"], json.dumps(movie), store.now()))
-        event('preparation', f'{movie.get("title", "Movie")} · queued for download and captions', movie_id=movie['id'])
+        event('preparation', f'{movie.get("title", "Movie")} · queued for download' + (' and captions' if self.whisper_enabled() else ''), movie_id=movie['id'])
         return self.status(movie["id"])
 
     def status(self, movie_id):
@@ -67,6 +67,24 @@ class Library:
 
     async def request(self, movie):
         return self.enqueue(movie)
+
+    def whisper_enabled(self):
+        return self.manager.settings.get('auto_whisper') is True
+
+    async def whisper_settings(self, enabled=None):
+        if enabled is not None:
+            if not isinstance(enabled, bool):
+                raise PlaybackError('Automatic Whisper must be on or off.', 'bad_request')
+            settings = {**self.manager.settings, 'auto_whisper': enabled}
+            config.save(settings)
+            self.manager.settings['auto_whisper'] = enabled
+            if not enabled and self.process and self.process.returncode is None:
+                try:
+                    self.process.kill()
+                except ProcessLookupError:
+                    pass
+            event('settings', 'Automatic Whisper ' + ('enabled' if enabled else 'disabled'))
+        return {'auto_whisper': self.whisper_enabled()}
 
     async def run(self):
         while True:
@@ -121,7 +139,7 @@ class Library:
                 future.set_result(None)
         self.protected.add(entry["id"])
         try:
-            if self.caption(movie):
+            if not self.whisper_enabled() or self.caption(movie):
                 return
             self.state(movie["id"], "transcribing")
             destination = self.caption_path(movie)
@@ -132,6 +150,8 @@ class Library:
                 "--threads", str(manager.settings.get("whisper_threads", 2)),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
             _, error = await self.process.communicate()
+            if not self.whisper_enabled():
+                return
             if self.process.returncode:
                 raise RuntimeError("Whisper failed: " + error.decode(errors="replace")[-500:])
             if not self.caption(movie):
