@@ -59,7 +59,7 @@ local favourites. Browser favourites have separate storage.
 
 ## Controls and acceptance
 
-- Arrows and Enter browse. Select **Play** or **Resume** on Home or movie details.
+- Arrows and Enter browse. The highlight starts on the first movie. Poster rows stay put under that highlight, which remains at the left until the last poster is on screen, and only then travels right. Up from the top of the page reaches **TV settings**. The Movie World title is not selectable. Select **Play** or **Resume** on Home or movie details.
 - Enter or Play/Pause toggles playback; dedicated media keys also work.
 - During playback press **Down** (or the Subtitle key) for the subtitle menu.
   Choose Off or an embedded track. The app remembers on/off and prefers English
@@ -118,7 +118,7 @@ The read-only UI endpoints match Android's catalogue presentation:
 
 The UI ports the Kotlin app's amber/near-black theme, condensed headings,
 MOVIE/WORLD wordmark, hero actions, 2:3 rounded posters, rating badges, progress
-lines, Home/Search/My List tabs, details, cast and related-title sections. Remote
+lines, Home/Search/My List/History tabs, a now-playing bar above those tabs, details, cast and related-title sections. Remote
 focus outlines and the PC connection form are TV-specific adaptations. Telegram
 and local Android file-picker actions are omitted because this app plays through
 the PC. Favourites and recently watched history remain local to the installation;

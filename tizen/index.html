@@ -4,14 +4,15 @@
   <title>Movie World</title><link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css">
 </head><body>
   <header class="top">
-    <a class="wordmark" href="#home" aria-label="Movie World Home"><span>MOVIE</span><span>WORLD</span></a>
-    <button id="settings-open" class="icon-button" aria-label="TV settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h18v14H9M3 13a8 8 0 0 1 8 8M3 17a4 4 0 0 1 4 4M3 21h.01"/></svg></button>
+    <div class="wordmark" role="img" aria-label="Movie World"><span>MOVIE</span><span>WORLD</span></div>
+    <button id="settings-open" class="icon-button" aria-label="TV settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg></button>
   </header>
   <main id="screen" tabindex="-1" aria-label="Home"></main>
   <nav class="tabs" aria-label="Main navigation">
-    <button data-tab="home" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v11h-6v-7H9v7H3z"/></svg><span>Home</span></button>
-    <button data-tab="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span>Search</span></button>
-    <button data-tab="list"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>My List</span></button>
+    <button data-tab="home" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>Home</span></button>
+    <button data-tab="search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg><span>Search</span></button>
+    <button data-tab="list"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg><span>My List</span></button>
+    <button data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3C8.03 3 4 7.03 4 12H1l4 4 4-4H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg><span>History</span></button>
   </nav>
   <section id="detail" class="detail" role="dialog" aria-modal="true" aria-label="Movie details" hidden></section>
   <section id="connection" class="settings-panel" role="dialog" aria-modal="true" aria-label="TV settings" hidden>

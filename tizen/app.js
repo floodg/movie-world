@@ -12,6 +12,7 @@
   let resume = [];
   let query = '', mode = 'title', genre = '', from = '', to = '', searchVersion = 0, debounce;
   let selectedActor = null, actorPicks = [];
+  const seen = {};
 
   function read(key) {
     try { const items = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(items) ? items : []; } catch (e) { return []; }
@@ -60,7 +61,7 @@
   }
   function card(movie, showRating = false) {
     const node = button('', () => openDetail(movie.id), 'poster'); node.textContent = '';
-    node.dataset.movieId = String(movie.id);
+    node.dataset.movieId = String(movie.id); seen[movie.id] = movie;
     node.setAttribute('aria-label', movie.title + (movie.year ? ', ' + movie.year : ''));
     node.appendChild(el('span', 'fallback', movie.title));
     const poster = image(movie.poster_url); if (poster) { poster.loading = 'lazy'; node.appendChild(poster); }
@@ -103,11 +104,36 @@
     else { const grid = el('div', 'grid'); favourites.forEach(movie => grid.appendChild(card(movie, true))); page.appendChild(grid); }
     screen.appendChild(page);
   }
+  function renderHistory() {
+    screen.textContent = ''; const page = el('section', 'page'); page.appendChild(el('h1', '', 'History'));
+    const movies = history.filter(p => p.movie).map(p => p.movie);
+    if (!movies.length) empty(page, 'No watch history yet', 'Movies you watch will appear here, newest first.');
+    else { const grid = el('div', 'grid'); movies.forEach(movie => grid.appendChild(card(movie, true))); page.appendChild(grid); }
+    screen.appendChild(page);
+  }
+  const titles = {home: 'Home', search: 'Search', list: 'My List', history: 'History'};
+  function renderRoute() {
+    if (route === 'home') renderHome(); else if (route === 'list') renderList(); else if (route === 'history') renderHistory(); else renderSearch();
+  }
+  /* The selector starts on the first movie; Home has no better default than its first poster. */
+  function defaultFocus() {
+    return (route === 'home' ? screen.querySelector('.poster') : null) || screen.querySelector('input,button');
+  }
   function showTab(next, focus = true) {
-    route = next; searchVersion++; window.scrollTo(0, 0); screen.setAttribute('aria-label', next === 'list' ? 'My List' : next === 'search' ? 'Search' : 'Home');
+    route = next; searchVersion++; window.scrollTo(0, 0); screen.setAttribute('aria-label', titles[next] || 'Home');
     document.querySelectorAll('[data-tab]').forEach(node => { if (node.dataset.tab === next) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current'); });
-    if (next === 'home') renderHome(); else if (next === 'list') renderList(); else renderSearch();
-    if (focus) { const first = screen.querySelector('input,button'); if (first) first.focus(); }
+    renderRoute();
+    if (focus) { const first = defaultFocus(); if (first) first.focus(); }
+  }
+  /* Re-render the current screen (data changed) and keep the selector where it was. */
+  function refreshScreen() {
+    const active = document.activeElement, inScreen = screen.contains(active), lost = !active || active === document.body;
+    const id = inScreen && active.dataset ? active.dataset.movieId : '';
+    const heroIndex = inScreen ? Array.from(screen.querySelectorAll('.hero button')).indexOf(active) : -1;
+    renderRoute();
+    if (route === 'search' || !detail.hidden || !document.getElementById('connection').hidden || !(inScreen || lost)) return;
+    const target = (id && screen.querySelector('[data-movie-id="' + id + '"]')) || (heroIndex >= 0 && screen.querySelectorAll('.hero button')[heroIndex]) || defaultFocus();
+    if (target) focusNode(target);
   }
   function renderSearch() {
     screen.textContent = ''; const page = el('section', 'page'); page.appendChild(el('h1', '', 'Search'));
@@ -226,22 +252,57 @@
       const result = await window.tvRequest('/api/tizen-catalogue/home?day=' + day);
       home = result;
       try { const progress = await window.tvRequest('/api/resume'); resume = progress.points; home.continuing = progress.movies; } catch (e) { home.continuing = []; }
-      if (route === 'home') renderHome();
+      if (route === 'home') refreshScreen();
     } catch (e) {
       if (route === 'home') { screen.textContent = ''; const page = el('div', 'page'); empty(page, 'Could not load the catalogue', e.message); page.appendChild(button('Retry', loadHome)); screen.appendChild(page); }
     }
   }
+  /* Poster rails: the row scrolls under the selector. The selector keeps its place on screen
+     while the row can still move, so on reaching the end it is the selector that travels right. */
+  function rowPadding(row) { return parseFloat(getComputedStyle(row).paddingLeft) || 0; }
+  function revealInRow(row, node) {
+    const pad = rowPadding(row), left = node.offsetLeft - row.scrollLeft, right = left + node.offsetWidth;
+    if (left < pad - 1) row.scrollLeft += left - pad;
+    else if (right > row.clientWidth - pad + 1) row.scrollLeft += right - (row.clientWidth - pad);
+  }
+  function moveInRow(row, current, direction) {
+    const next = direction > 0 ? current.nextElementSibling : current.previousElementSibling;
+    if (!next || !next.classList.contains('poster')) return;
+    if (direction > 0) row.scrollLeft += next.offsetLeft - current.offsetLeft;
+    else { const slot = next.offsetLeft - row.scrollLeft, pad = rowPadding(row); if (slot < pad) row.scrollLeft -= pad - slot; }
+    next.focus(); revealInRow(row, next);
+  }
+  /* Keep the focused item clear of the fixed header and bottom tab bar. */
+  function revealVertically(node) {
+    if (node.closest('.top,.tabs,#connection')) return;
+    const inDetail = !!node.closest('#detail');
+    if (!inDetail && node.closest('.hero')) { window.scrollTo(0, 0); return; }
+    const tabs = document.querySelector('.tabs');
+    const top = inDetail ? 16 : document.querySelector('.top').offsetHeight + 16;
+    const bottom = window.innerHeight - (inDetail ? 0 : tabs.offsetHeight) - 16;
+    const rect = node.getBoundingClientRect(), head = (node.closest('.rail') || node).getBoundingClientRect();
+    const delta = head.top < top ? head.top - top : rect.bottom > bottom ? rect.bottom - bottom : 0;
+    if (!delta) return;
+    if (inDetail) detail.scrollTop += delta; else window.scrollBy(0, delta);
+  }
+  function focusNode(node) {
+    node.focus();
+    const row = node.closest('.poster-row');
+    if (row) revealInRow(row, node); else node.scrollIntoView({block:'nearest', inline:'nearest'});
+    revealVertically(node);
+  }
   document.querySelectorAll('[data-tab]').forEach(node => node.onclick = () => showTab(node.dataset.tab));
-  document.querySelector('.wordmark').onclick = event => { event.preventDefault(); showTab('home'); };
   window.addEventListener('scroll', () => document.querySelector('.top').classList.toggle('solid', window.scrollY > 60));
   window.addEventListener('mw-progress', event => {
     const data = event.detail;
     let movie = detailMovie && String(detailMovie.id) === String(data.movie_id) ? detailMovie : home && home.featured && String(home.featured.id) === String(data.movie_id) ? home.featured : null;
+    if (!movie) movie = seen[data.movie_id] || null;
     if (!movie && home) { for (const row of home.rows) { movie = row.movies.find(m => String(m.id) === String(data.movie_id)); if (movie) break; } }
-    history = [{...data, movie, updated_at:Date.now() / 1000}, ...history.filter(p => String(p.movie_id) !== String(data.movie_id))].slice(0, 24);
+    if (!movie) { const old = history.find(p => String(p.movie_id) === String(data.movie_id)); movie = old && old.movie || null; }
+    history = [{...data, movie, updated_at:Date.now() / 1000}, ...history.filter(p => String(p.movie_id) !== String(data.movie_id))].slice(0, 100);
     save('movie-world-watch-progress', history);
   });
-  window.addEventListener('mw-playback-closed', () => { loadHome(); });
+  window.addEventListener('mw-playback-closed', () => { loadHome(); if (route === 'history' || route === 'list') refreshScreen(); });
   document.addEventListener('keydown', event => {
     const key = event.keyCode;
     if (document.body.classList.contains('mw-playing')) return;
@@ -274,19 +335,30 @@
     }
     if (key < 37 || key > 40 || (current.tagName === 'INPUT' && (key === 37 || key === 39))) return;
     event.preventDefault();
+    if (key === 40 && current.id === 'settings-open' && root === document.body) {
+      const below = screen.querySelector('.hero button') || defaultFocus(); if (below) focusNode(below); return;
+    }
+    const row = current.closest('.poster-row');
+    if (row && (key === 37 || key === 39) && current.classList.contains('poster')) { moveInRow(row, current, key === 39 ? 1 : -1); return; }
     const box = current.getBoundingClientRect(), x = box.left + box.width / 2, y = box.top + box.height / 2;
-    let best = null, score = Infinity;
-    items.forEach(node => {
-      if (node === current) return;
-      const rect = node.getBoundingClientRect(), dx = rect.left + rect.width / 2 - x, dy = rect.top + rect.height / 2 - y;
-      const forward = key === 37 ? -dx : key === 39 ? dx : key === 38 ? -dy : dy;
-      const side = key === 37 || key === 39 ? Math.abs(dy) : Math.abs(dx);
-      if (forward <= 1) return;
-      const distance = forward + side * 3;
-      if (distance < score) { best = node; score = distance; }
-    });
+    const nearest = pool => {
+      let best = null, score = Infinity;
+      pool.forEach(node => {
+        if (node === current) return;
+        const rect = node.getBoundingClientRect(), dx = rect.left + rect.width / 2 - x, dy = rect.top + rect.height / 2 - y;
+        const forward = key === 37 ? -dx : key === 39 ? dx : key === 38 ? -dy : dy;
+        const side = key === 37 || key === 39 ? Math.abs(dy) : Math.abs(dx);
+        if (forward <= 1) return;
+        const distance = forward + side * 3;
+        if (distance < score) { best = node; score = distance; }
+      });
+      return best;
+    };
+    /* Stay in the catalogue until an edge, then move into the tab bar or settings. */
+    let best = screen.contains(current) ? nearest(items.filter(node => screen.contains(node))) : null;
+    if (!best) best = nearest(items);
     if (!best && !items.includes(current)) best = items[0];
-    if (best) { best.focus(); best.scrollIntoView({block:'nearest',inline:'nearest'}); }
+    if (best) focusNode(best);
   });
   showTab('home', false); loadHome();
 })();

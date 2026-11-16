@@ -481,9 +481,21 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
+    def log_request(self, code='-', size='-'):
+        super().log_request(code, size)
+        path = urlparse(self.path).path
+        if path.startswith('/api/operations'):
+            return
+        if isinstance(code, int) and (code >= 400 or self.command == 'POST'):
+            from tvplay.operations import event
+            event('http', f'{self.command} {path} · HTTP {code}', 'error' if code >= 400 else 'info')
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        if path == '/api/operations':
+            self.handle_operations('GET', parsed.query)
+            return
         if path in ("/api/personal", "/api/personal/merge", "/api/personal/sync"):
             self.handle_personal("GET", path)
             return
@@ -498,6 +510,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        if path == '/api/operations':
+            self.handle_operations('POST', parsed.query)
+            return
         if path in ("/api/personal", "/api/personal/merge", "/api/personal/sync"):
             self.handle_personal("POST", path)
             return
@@ -511,6 +526,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Not found"}, 404)
             return
         self.handle_tv("POST", path, parsed.query)
+
+    def handle_operations(self, method, query):
+        from tvplay import operations
+        # Operation history contains personal activity; keep browser access same-origin.
+        origin = self.headers.get('Origin')
+        expected = ('https' if self.secure else 'http') + '://' + self.headers.get('Host', '')
+        if (origin and origin != expected) or self.headers.get('Sec-Fetch-Site') == 'cross-site':
+            self.send_json({'error': 'Cross-origin requests are not allowed'}, 403)
+            return
+        try:
+            if method == 'POST':
+                problem = self.cross_site_problem()
+                if problem:
+                    self.send_json({'error': problem}, 403)
+                    return
+                body = self.read_json(max_length=128 * 1024)
+                if body is None:
+                    return
+                if not isinstance(body, dict):
+                    raise ValueError('Send an event batch')
+                self.send_json({'accepted': operations.ingest(body.get('events'))})
+            else:
+                self.send_json(operations.history(parse_qs(query)))
+        except ValueError as exc:
+            self.send_json({'error': str(exc)}, 400)
 
     def handle_personal(self, method, path):
         if self.personal is None:
@@ -535,7 +575,18 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_json()
             if body is None: return
             try:
-                if path == "/api/personal/merge": self.personal.browser_merge(body)
+                if path == "/api/personal/merge":
+                    self.personal.browser_merge(body)
+                    if self.tv:
+                        active = {r["movieId"] for r in self.personal.snapshot()["favourites"] if not r.get("removed")}
+                        for row in body.get("favourites", []):
+                            if row.get("movieId") in active and not row.get("removed"):
+                                movie = movie_detail(int(row["movieId"]))
+                                if movie and movie.get("telegram_url"):
+                                    try:
+                                        self.tv.call(self.tv.manager.library.request(movie))
+                                    except Exception as exc:
+                                        print(f"Favourite saved; background preparation could not be queued: {exc}", flush=True)
                 elif path != "/api/personal/sync":
                     self.send_json({"error": "Method not allowed"}, 405)
                     return
@@ -622,7 +673,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         manager = self.tv.manager
         try:
-            if parts == ["api", "tvs"] and method == "GET":
+            if parts == ["api", "playback", "prepare"] and method == "POST":
+                movie_id = body.get("movie_id")
+                if not isinstance(movie_id, int) or isinstance(movie_id, bool):
+                    self.send_json({"error": "Choose a movie.", "code": "bad_request"}, 400)
+                    return
+                movie = movie_detail(movie_id)
+                if movie is None:
+                    self.send_json({"error": "Movie not found", "code": "not_found"}, 404)
+                    return
+                self.send_json({"preparation": self.tv.call(manager.library.request(movie))}, 202)
+            elif len(parts) == 4 and parts[:3] == ["api", "playback", "preparation"] and method == "GET" and parts[3].isascii() and parts[3].isdigit():
+                self.send_json({"preparation": manager.library.status(int(parts[3]))})
+            elif len(parts) == 4 and parts[:3] == ["api", "playback", "captions"] and method == "GET" and parts[3].isascii() and parts[3].isdigit():
+                movie = movie_detail(int(parts[3]))
+                self.send_json({"srt": manager.library.caption(movie) if movie else None})
+            elif parts == ["api", "tvs"] and method == "GET":
                 refresh = parse_qs(query).get("refresh", [""])[0] == "1"
                 self.send_json(self.tv.call(manager.list_renderers(refresh)))
             elif len(parts) == 4 and parts[:3] == ["api", "playback", "cache"] and method == "GET" and parts[3].isascii() and parts[3].isdigit():
@@ -853,7 +919,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        if not self.path.startswith("/api/personal"):
+        if not self.path.startswith(("/api/personal", "/api/operations")):
             self.send_header("Access-Control-Allow-Origin", "*")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
@@ -904,10 +970,13 @@ def main():
         print("Telegram sync unavailable; local personal storage enabled. Install requirements.txt.", flush=True)
     print(f"Movie World at {scheme}://{args.host}:{args.port}", flush=True)
     try:
+        from tvplay.operations import event
+        event('server', 'PC server started')
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        event('server', 'PC server stopped', 'warning')
         if personal_runtime is not None:
             personal_runtime.stop()
         if tv is not None:

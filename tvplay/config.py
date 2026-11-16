@@ -25,6 +25,8 @@ DEFAULTS = {
     "ffmpeg": "ffmpeg",
     "ffprobe": "ffprobe",
     "pairing_code": None,
+    "whisper_model": "small",
+    "whisper_threads": 2,
 }
 
 

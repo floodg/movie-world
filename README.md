@@ -8,6 +8,8 @@ A local movie catalogue browser built with Python, SQLite, and vanilla HTML, CSS
 - Search the catalogue by title or actor.
 - View movie details, posters, and backdrops.
 - Save favourites in PC SQLite, keep a browser cache for offline use, and sync with Android through Telegram Saved Messages.
+- Prepare new favourites on the PC with background downloads and local Whisper captions; see [background captions setup](docs/background-captions.md).
+- Inspect PC and Android operations in the [operation history](docs/operation-history.md).
 - Resume TV playback and recently watched titles sync through the same Telegram account.
 - Enrich movie metadata and cast information using TMDB.
 
