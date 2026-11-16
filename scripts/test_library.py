@@ -114,6 +114,35 @@ class LibraryTests(unittest.IsolatedAsyncioTestCase):
         process.kill.assert_called_once()
         self.assertFalse(self.library.whisper_enabled())
 
+    async def test_disabling_during_spawn_kills_worker_and_preserves_download(self):
+        entry = self.cached()
+        spawning, release = asyncio.Event(), asyncio.Event()
+        process = Mock(returncode=None, communicate=AsyncMock(), wait=AsyncMock())
+
+        async def spawn(*args, **kwargs):
+            spawning.set()
+            await release.wait()
+            return process
+
+        with patch('asyncio.create_subprocess_exec', side_effect=spawn), patch('tvplay.config.save'):
+            task = asyncio.create_task(self.library.prepare(MOVIE))
+            try:
+                await asyncio.wait_for(spawning.wait(), 2)
+                self.assertIsNone(self.library.process)
+                await self.library.whisper_settings(False)
+                release.set()
+                await asyncio.wait_for(task, 2)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+        process.kill.assert_called_once()
+        process.wait.assert_awaited_once()
+        process.communicate.assert_not_awaited()
+        self.assertIsNone(self.library.process)
+        self.assertFalse(self.library.protected)
+        self.assertEqual(self.manager.cache.lookup(123, 456)['id'], entry['id'])
+
 
 if __name__ == '__main__':
     unittest.main()

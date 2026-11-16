@@ -149,6 +149,10 @@ class Library:
                 "--model", str(manager.settings.get("whisper_model", "small")),
                 "--threads", str(manager.settings.get("whisper_threads", 2)),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            # Disabling can run while spawning, before self.process is assigned.
+            # Let finally terminate and reap that worker before awaiting inference.
+            if not self.whisper_enabled():
+                return
             _, error = await self.process.communicate()
             if not self.whisper_enabled():
                 return
