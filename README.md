@@ -29,6 +29,22 @@ Open http://127.0.0.1:8765 in your browser. Stop the server with Ctrl+C.
 
 The server reads the included `sql-lite/movie-world.sqlite` catalogue in read-only mode. Personal data is stored separately in `.local/jobs.sqlite`, alongside existing playback state. Browser favourites and history are adopted once per account, and existing PC resume points are preserved. The browser retains an offline cache and queues edits until the PC is reachable.
 
+### Android home and away playback
+
+The Android companion discovers this server on Wi-Fi using `_movieworld._tcp.local.`
+mDNS announcements. Install `requirements.txt` and restart the server to enable
+advertising its current LAN address and actual HTTP port. Loopback-only and HTTPS
+listeners are not advertised. Discovery is optional: a saved/manual PC address
+continues to work when multicast is blocked. Allow mDNS (UDP 5353) only on the
+trusted private network; no router port forwarding is needed.
+
+When the PC and selected TV are reachable, Android defaults to TV playback and
+prefers the PC's completed cache. Otherwise it defaults to its own in-app video
+player, downloading from Telegram first when needed. The phone also caches ready
+PC captions for later use away from home. Personal data continues syncing through
+Telegram over Wi-Fi or mobile data. An explicit Play on TV option remains available
+for phone-hosted casting with the PC off.
+
 ### Personal data sync with Android
 
 Install `requirements.txt` and configure the PC Telegram login using the existing playback setup below. The server syncs automatically through that account's Saved Messages, including without `--tv-playback`. With playback enabled, sync shares the existing Telegram client and worker rather than opening another session. Without the optional packages or a working Telegram login, local SQLite and browser caches remain usable.

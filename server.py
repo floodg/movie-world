@@ -974,6 +974,8 @@ def main():
     except ImportError:
         print("Telegram sync unavailable; local personal storage enabled. Install requirements.txt.", flush=True)
     print(f"Movie World at {scheme}://{args.host}:{args.port}", flush=True)
+    from tvplay.discovery import advertise
+    advertisement = advertise(args.host, server.server_port, scheme)
     try:
         from tvplay.operations import event
         event('server', 'PC server started')
@@ -981,6 +983,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if advertisement is not None:
+            advertisement.stop()
         event('server', 'PC server stopped', 'warning')
         if personal_runtime is not None:
             personal_runtime.stop()
