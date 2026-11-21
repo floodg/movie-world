@@ -38,41 +38,44 @@ class LanAdvertisement:
         return self
 
     def _run(self):
-        zc = None
-        info = None
+        registrations = []
+
+        def withdraw():
+            while registrations:
+                zc, info = registrations.pop()
+                try:
+                    if info is not None:
+                        zc.unregister_service(info)
+                finally:
+                    zc.close()
+
         try:
             import ifaddr
             from zeroconf import IPVersion, ServiceInfo, Zeroconf
-            zc = Zeroconf(ip_version=IPVersion.V4Only)
             previous = None
             while not self.closed.is_set():
                 addresses = lan_addresses(self.host, ifaddr.get_adapters())
                 if addresses != previous:
-                    if info is not None:
-                        zc.unregister_service(info)
-                        info = None
-                    if previous is not None:
-                        zc.close()
-                        zc = Zeroconf(ip_version=IPVersion.V4Only)
-                    if addresses:
+                    withdraw()
+                    for address in addresses:
+                        # Each LAN sees only its own reachable address. This also keeps
+                        # virtual-adapter addresses out of older Android NSD results.
+                        zc = Zeroconf(interfaces=[address], ip_version=IPVersion.V4Only)
+                        registrations.append((zc, None))
                         hostname = socket.gethostname().split(".")[0]
                         info = ServiceInfo(SERVICE_TYPE, f"Movie World on {hostname}.{SERVICE_TYPE}",
-                            port=self.port, parsed_addresses=addresses,
+                            port=self.port, parsed_addresses=[address],
                             properties={"app": "movie-world", "version": "1", "scheme": "http"},
-                            server=f"{hostname}.local.")
+                            server=f"mw-{hostname}-{address.replace('.', '-')}.local.")
                         zc.register_service(info, allow_name_change=True)
+                        registrations[-1] = (zc, info)
                     previous = addresses
                 self.closed.wait(30)
         except Exception as error:
             # Discovery is optional; a saved/manual address remains usable.
             print(f"LAN discovery unavailable: {error}", flush=True)
         finally:
-            if zc is not None:
-                try:
-                    if info is not None:
-                        zc.unregister_service(info)
-                finally:
-                    zc.close()
+            withdraw()
 
     def stop(self):
         self.closed.set()

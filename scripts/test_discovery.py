@@ -63,6 +63,21 @@ class DiscoveryTests(unittest.TestCase):
             client.close.assert_called_once()
         self.assertEqual(zc_module.ServiceInfo.call_args_list[1].kwargs["parsed_addresses"], ["192.168.1.21"])
 
+    def test_virtual_adapter_address_is_not_advertised_on_home_interface(self):
+        advertisement = LanAdvertisement("0.0.0.0", 80)
+        clients = [Mock(), Mock()]
+        infos = [Mock(), Mock()]
+        zc_module = SimpleNamespace(IPVersion=SimpleNamespace(V4Only=4),
+            ServiceInfo=Mock(side_effect=infos), Zeroconf=Mock(side_effect=clients))
+        adapters = [SimpleNamespace(ips=[SimpleNamespace(ip=ip)]) for ip in ["172.20.1.1", "192.168.1.20"]]
+        fake_ifaddr = SimpleNamespace(get_adapters=lambda: adapters)
+        advertisement.closed.wait = lambda _: advertisement.closed.set()
+        with patch.dict(sys.modules, zeroconf=zc_module, ifaddr=fake_ifaddr):
+            advertisement._run()
+        for create, info in zip(zc_module.Zeroconf.call_args_list, zc_module.ServiceInfo.call_args_list):
+            self.assertEqual(create.kwargs["interfaces"], info.kwargs["parsed_addresses"])
+            self.assertEqual(len(info.kwargs["parsed_addresses"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
